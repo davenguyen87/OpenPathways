@@ -1,0 +1,98 @@
+{
+  "scorm12-violations.zip": {
+    "packageType": "scorm12",
+    "expectedCriteria": [
+      "1.1.1",
+      "1.2.1",
+      "1.2.2",
+      "1.4.1",
+      "1.4.2",
+      "2.1.1",
+      "2.1.2",
+      "2.4.7",
+      "2.5.7",
+      "2.5.8",
+      "3.3.2",
+      "3.3.8",
+      "4.1.2"
+    ],
+    "minViolations": 12,
+    "description": "SCORM 1.2 package with 13 distinct WCAG 2.2 AA violations seeded throughout index.html"
+  },
+  "scorm12-clean.zip": {
+    "packageType": "scorm12",
+    "expectedCriteria": [],
+    "minViolations": 0,
+    "description": "SCORM 1.2 package with zero violations. Valid manifest, proper semantic HTML, labels, focus styles, sufficient contrast."
+  },
+  "scorm12-articulate-style.zip": {
+    "packageType": "scorm12",
+    "minViolations": 5,
+    "expectedCriteria": [
+      "1.1.1",
+      "1.4.3",
+      "2.1.1",
+      "3.3.2"
+    ],
+    "description": "SCORM 1.2 package mimicking Articulate Storyline output: multiple SCOs with deep organization tree, story.html entry point, story_content/ slide bundles, CSS files, and mobile/html5 alternatives. Includes missing alt text, low-contrast text, unsupported viewport user-scalable=no, and form inputs without labels."
+  },
+  "scorm2004-captivate-style.zip": {
+    "packageType": "scorm2004",
+    "minViolations": 4,
+    "expectedCriteria": [
+      "1.1.1",
+      "1.4.3",
+      "1.4.11",
+      "2.1.1",
+      "2.4.7",
+      "3.3.2"
+    ],
+    "description": "SCORM 2004 package mimicking Adobe Captivate HTML5 output: absolute-positioned slide layout, cp-* class prefix, dr/ runtime directory, legacy swfobject detection, and slide HTML files. Includes decorative images without alt text, div role=button without keyboard handlers, fixed-pixel containers, insufficient focus visible style, and form inputs without labels."
+  },
+  "aicc-profile1.zip": {
+    "packageType": "aicc",
+    "expectedCriteria": [
+      "1.1.1",
+      "1.2.2",
+      "2.1.1",
+      "2.5.8",
+      "3.3.2"
+    ],
+    "minViolations": 5,
+    "description": "AICC profile 1 package with 5 distinct WCAG 2.2 AA violations. Includes course.crs and course.au files plus index.html entry point."
+  },
+  "scorm12-aria-dynamic.zip": {
+    "packageType": "scorm12",
+    "expectedCriteria": [
+      "2.4.3",
+      "3.2.4",
+      "4.1.3"
+    ],
+    "minViolations": 0,
+    "dynamicOnly": true,
+    "description": "SCORM 1.2 package with dynamic ARIA issues: focus order violations (positive tabindex), label inconsistency (Next vs Continue), and missing aria-live on status regions."
+  },
+  "xapi-violations.zip": {
+    "packageType": "xapi",
+    "expectedCriteria": [
+      "1.1.1",
+      "2.1.1",
+      "2.5.8",
+      "3.3.2"
+    ],
+    "minViolations": 4,
+    "description": "xAPI / Tin Can package with 4 launchable activities and static WCAG violations including missing alt text, keyboard support, target size, and form labels."
+  },
+  "cmi5-violations.zip": {
+    "packageType": "cmi5",
+    "expectedCriteria": [
+      "1.1.1",
+      "1.3.5",
+      "1.4.11",
+      "2.5.8",
+      "3.3.2"
+    ],
+    "minViolations": 5,
+    "description": "cmi5 (xAPI profile) package with 2 launchable assignable units and static WCAG violations including missing alt text, input purpose, UI contrast, target size, and form labels."
+  }
+}

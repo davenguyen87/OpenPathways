@@ -1,0 +1,48 @@
+# Test files and fixtures
+test/
+test/fixtures/
+
+# Internal documentation and checklists
+docs/PRD_SCORM_WCAG22.md
+docs/PHASE3_PLAN.md
+CLAUDE.md
+INSTALL_REQUIRED.md
+PUBLISH.md
+
+# Development and reference materials
+archive/
+build-fixtures.js
+build-fixtures-fixed.js
+gen-xapi-fixture.js
+
+# Node modules (npm handles this automatically)
+node_modules/
+
+# Git artifacts
+.git
+.gitignore
+
+# OS artifacts
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build and cache artifacts
+.cache/
+dist/
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Output directories (from local runs)
+scorm-a11y-report/
+
+# This file itself
+.npmignore
