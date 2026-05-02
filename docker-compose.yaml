@@ -19,6 +19,10 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
+      # Coolify magic env: tells Traefik to route the public FQDN to
+      # web:4280. The value is auto-generated from the application's
+      # configured domain (see Coolify's "Magic Environment Variables").
+      SERVICE_FQDN_WEB_4280:
       OPEN_PATHWAYS_MODE: hosted
       OPEN_PATHWAYS_PORT: "4280"
       OPEN_PATHWAYS_BEHIND_TLS: ${OPEN_PATHWAYS_BEHIND_TLS:-true}
