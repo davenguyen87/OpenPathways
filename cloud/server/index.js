@@ -40,7 +40,10 @@ const { audit } = require('../../src/index');
 const pkg = require('../package.json');
 
 const DEFAULT_PORT = 4280;
-const HOST = '127.0.0.1';
+// Bind interface — defaults to 0.0.0.0 so containers + reverse proxies
+// can reach us. Override with OPEN_PATHWAYS_HOST=127.0.0.1 for the
+// loopback-only behavior /web/server/index.js uses.
+const HOST = process.env.OPEN_PATHWAYS_HOST || '0.0.0.0';
 
 function parseArgs(argv) {
   const args = { port: null, open: null, help: false, version: false };
