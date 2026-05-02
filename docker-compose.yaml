@@ -1,26 +1,18 @@
-# Open Pathways Cloud — docker-compose tailored for Coolify deploy.
+# Open Pathways Cloud — Coolify deploy compose (repo root).
 #
-# Differs from cloud/docker-compose.yml (local-dev) in three ways:
-#   1. Postgres lives outside the stack — Coolify provisions it as a
-#      managed resource and we reference it via DATABASE_URL set in the
-#      Coolify env-var UI. (Coolify's managed Postgres is reachable from
-#      any application via its DB UUID hostname on the shared network.)
-#   2. No localhost port bindings; Coolify's Traefik routes the public
-#      URL (set via the application's Domains UI) to the `web` service.
-#   3. No MAIL_CAPTURE_DIR mount; production uses real SMTP. Set the
-#      SMTP_* env vars in Coolify when ready. Until SMTP is configured,
-#      magic-link emails won't actually send (the request endpoint will
-#      400 because the auth lib refuses to start without SMTP_HOST or
-#      MAIL_CAPTURE_DIR — set MAIL_CAPTURE_DIR=/var/op/mail to test
-#      without SMTP).
+# Lives at the repo root because Coolify's docker-compose build pack
+# expects /docker-compose.yaml by default. Bundles web + worker + minio
+# + bucket-init in one stack so they share a Docker network natively.
+# Postgres is a separate Coolify-managed resource referenced via
+# DATABASE_URL set in the Coolify env-var UI.
 #
-# Coolify build pack: docker-compose. Base directory: /cloud.
-# Compose file path: docker-compose.coolify.yml.
+# For local dev (full stack including Postgres + bind-mounted mail
+# capture dir), use cloud/docker-compose.yml instead.
 
 services:
   web:
     build:
-      context: ..
+      context: .
       dockerfile: cloud/Dockerfile
     restart: unless-stopped
     depends_on:
@@ -69,7 +61,7 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: cloud/Dockerfile
     restart: unless-stopped
     depends_on:
