@@ -1,0 +1,140 @@
+# Open Pathways Cloud — docker-compose tailored for Coolify deploy.
+#
+# Differs from cloud/docker-compose.yml (local-dev) in three ways:
+#   1. Postgres lives outside the stack — Coolify provisions it as a
+#      managed resource and we reference it via DATABASE_URL set in the
+#      Coolify env-var UI. (Coolify's managed Postgres is reachable from
+#      any application via its DB UUID hostname on the shared network.)
+#   2. No localhost port bindings; Coolify's Traefik routes the public
+#      URL (set via the application's Domains UI) to the `web` service.
+#   3. No MAIL_CAPTURE_DIR mount; production uses real SMTP. Set the
+#      SMTP_* env vars in Coolify when ready. Until SMTP is configured,
+#      magic-link emails won't actually send (the request endpoint will
+#      400 because the auth lib refuses to start without SMTP_HOST or
+#      MAIL_CAPTURE_DIR — set MAIL_CAPTURE_DIR=/var/op/mail to test
+#      without SMTP).
+#
+# Coolify build pack: docker-compose. Base directory: /cloud.
+# Compose file path: docker-compose.coolify.yml.
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      OPEN_PATHWAYS_MODE: hosted
+      OPEN_PATHWAYS_PORT: "4280"
+      OPEN_PATHWAYS_BEHIND_TLS: ${OPEN_PATHWAYS_BEHIND_TLS:-true}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      DB_DRIVER: postgres
+      DATABASE_URL: ${DATABASE_URL}
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-op-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: us-east-1
+      WORKER_QUEUE: pgboss
+      RATE_LIMIT_STORE: postgres
+      SESSION_SECRET: ${SESSION_SECRET}
+      ALLOWLIST_EMAIL_DOMAINS: ${ALLOWLIST_EMAIL_DOMAINS:-}
+      ALLOWLIST_EMAILS: ${ALLOWLIST_EMAILS:-}
+      MAIL_CAPTURE_DIR: ${MAIL_CAPTURE_DIR:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Open Pathways <noreply@example.com>}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      OPEN_PATHWAYS_RETENTION_DAYS: ${OPEN_PATHWAYS_RETENTION_DAYS:-30}
+      QUOTA_CONCURRENT_JOBS: ${QUOTA_CONCURRENT_JOBS:-2}
+      QUOTA_UPLOADS_PER_DAY: ${QUOTA_UPLOADS_PER_DAY:-50}
+      QUOTA_STORED_BYTES: ${QUOTA_STORED_BYTES:-5368709120}
+      QUOTA_STORED_BYTES_TOTAL: ${QUOTA_STORED_BYTES_TOTAL:-0}
+    expose:
+      - "4280"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4280/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - mail:/var/op/mail
+
+  worker:
+    build:
+      context: ..
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    command: ["node", "cloud/worker/index.js"]
+    environment:
+      OPEN_PATHWAYS_MODE: hosted
+      DB_DRIVER: postgres
+      DATABASE_URL: ${DATABASE_URL}
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-op-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: us-east-1
+      WORKER_QUEUE: pgboss
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ALLOWLIST_EMAIL_DOMAINS: ${ALLOWLIST_EMAIL_DOMAINS:-}
+      ALLOWLIST_EMAILS: ${ALLOWLIST_EMAILS:-}
+      MAIL_CAPTURE_DIR: ${MAIL_CAPTURE_DIR:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Open Pathways <noreply@example.com>}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: "2"
+    volumes:
+      - mail:/var/op/mail
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    expose:
+      - "9000"
+      - "9001"
+
+  # One-shot: create the bucket if it doesn't exist, then exit. Re-runs
+  # idempotently on every deploy.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY} >/dev/null 2>&1; do
+        echo 'waiting for minio...'; sleep 1;
+      done &&
+      /usr/bin/mc mb --ignore-existing local/${S3_BUCKET:-op-uploads} &&
+      echo 'bucket ${S3_BUCKET:-op-uploads} ready'
+      "
+
+volumes:
+  minio-data:
+  mail:
