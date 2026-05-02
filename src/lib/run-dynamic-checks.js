@@ -7,8 +7,24 @@ const axTreeAdapter = require('./ax-tree-adapter');
  * Orchestrates Playwright browser lifecycle, loads entry point HTML files,
  * captures accessibility tree snapshots, and invokes dynamic checks.
  *
+ * Optional progress hook: pass options.onProgress(event). Used by the web UI.
+ * Emits, in addition to whatever the caller emits around the wrapper:
+ *   dynamic-page  { path, index, total }   per entry-point page load
+ *   dynamic-check { id, name, index, total } per dynamic check invocation
+ * The hook is best-effort — exceptions are swallowed so a misbehaving
+ * subscriber can never break a dynamic run.
+ *
+ * Cancellation contract (Phase 6)
+ * -------------------------------
+ * Pass options.signal (AbortSignal) to make this runner cancellable. When
+ * the signal fires we close the Playwright browser immediately — that
+ * unblocks any in-flight page.goto() within Playwright's connection
+ * teardown — and we throw an AbortError on the next inter-page or
+ * inter-check boundary. Net effect: cancel-to-stop is ~1 second on a
+ * dynamic-phase audit even if a single page is mid-navigation.
+ *
  * @param {object} ctx - AuditContext (with packageRoot, entryPoints, files, etc.)
- * @param {object} options - { browser: 'chromium'|'firefox'|'webkit', timeout: number, headless: bool }
+ * @param {object} options - { browser: 'chromium'|'firefox'|'webkit', timeout: number, headless: bool, onProgress?: function, signal?: AbortSignal }
  * @returns {Promise<{ violations: Array, iframeWarnings: Array, skipped: bool, reason?: string }>}
  */
 async function runDynamicChecks(ctx, options = {}) {
@@ -16,7 +32,25 @@ async function runDynamicChecks(ctx, options = {}) {
     browser: browserType = 'chromium',
     timeout = 30000,
     headless = true,
+    onProgress = null,
+    signal = null,
   } = options;
+
+  const emit = typeof onProgress === 'function'
+    ? (stage, details) => {
+        try { onProgress({ stage, ts: Date.now(), ...(details || {}) }); }
+        catch (_) { /* swallow — see docstring */ }
+      }
+    : () => {};
+
+  // Throw an AbortError if the caller's signal has fired. No-op when null.
+  const throwIfAborted = () => {
+    if (signal && signal.aborted) {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+  };
 
   // Try to require Playwright; fail gracefully if not installed
   let playwright;
@@ -45,19 +79,44 @@ async function runDynamicChecks(ctx, options = {}) {
   }
 
   let browserInstance = null;
+  let onAbort = null;
 
   try {
+    throwIfAborted();
+
     // Launch browser
     browserInstance = await playwright[browserType].launch({
       headless,
     });
+
+    // Phase 6: when the caller's signal fires, close the browser eagerly.
+    // That makes any in-flight page.goto() reject within Playwright's
+    // connection teardown (typically <1s) instead of waiting out the
+    // 30-second navigation timeout.
+    if (signal) {
+      onAbort = () => {
+        if (browserInstance) {
+          // Fire-and-forget; we don't await here so the abort listener
+          // returns immediately. The finally block below also tries close.
+          browserInstance.close().catch(() => {});
+        }
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     // Store page records in context for dynamic checks to use
     ctx.pages = [];
     ctx.axTree = new Map();
 
     // Load each entry point HTML file
-    for (const entryPoint of ctx.entryPoints) {
+    for (let i = 0; i < ctx.entryPoints.length; i++) {
+      throwIfAborted();
+      const entryPoint = ctx.entryPoints[i];
+      emit('dynamic-page', {
+        path: entryPoint,
+        index: i + 1,
+        total: ctx.entryPoints.length,
+      });
       const filePath = path.join(ctx.packageRoot, entryPoint);
       const fileUrl = `file://${filePath}`;
 
@@ -132,7 +191,15 @@ async function runDynamicChecks(ctx, options = {}) {
     const violations = [];
     const iframeWarnings = [];
 
-    for (const check of dynamicChecks) {
+    for (let i = 0; i < dynamicChecks.length; i++) {
+      throwIfAborted();
+      const check = dynamicChecks[i];
+      emit('dynamic-check', {
+        id: check.id,
+        name: check.name,
+        index: i + 1,
+        total: dynamicChecks.length,
+      });
       try {
         const checkViolations = await check.run(ctx);
         if (Array.isArray(checkViolations)) {
@@ -186,6 +253,10 @@ async function runDynamicChecks(ctx, options = {}) {
       skipped: false,
     };
   } catch (err) {
+    // Re-throw cancellation so audit() can propagate it as a clean cancel
+    // rather than treating it as a partial / "skipped" dynamic phase.
+    if (err && err.name === 'AbortError') throw err;
+
     // Unexpected error; return gracefully
     console.error(`Dynamic checks orchestration error: ${err.message}`);
     return {
@@ -195,6 +266,9 @@ async function runDynamicChecks(ctx, options = {}) {
       reason: `orchestration error: ${err.message}`,
     };
   } finally {
+    if (signal && onAbort) {
+      try { signal.removeEventListener('abort', onAbort); } catch (_) {}
+    }
     // Always close browser
     if (browserInstance) {
       try {

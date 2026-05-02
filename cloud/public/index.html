@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Open Pathways Web</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Open Pathways</a>
+      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+    </div>
+    <div class="topbar-meta" id="topbar-meta">
+      <span id="topbar-user" class="topbar-user hidden"></span>
+      <button id="topbar-logout" class="btn btn-link hidden" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <main id="view-root">
+    <!-- ============================================================
+         Login (Phase 9B, hosted mode only)
+         ============================================================ -->
+    <section class="view view-login hidden" data-view="login">
+      <div class="login-card">
+        <h1 class="login-title">Sign in</h1>
+        <p class="muted">Enter your email and we'll send you a sign-in link.</p>
+        <form id="login-form" class="login-form">
+          <label class="login-field">
+            <span>Email</span>
+            <input id="login-email" name="email" type="email" autocomplete="email" required>
+          </label>
+          <button class="btn btn-primary" id="login-submit" type="submit">Send sign-in link</button>
+        </form>
+        <p class="login-status muted" id="login-status"></p>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         Idle: drop zone + file picker + try-a-sample
+         ============================================================ -->
+    <section class="view view-idle" data-view="idle">
+      <div class="dropzone" id="dropzone" role="region" aria-label="Drop a SCORM or AICC zip here">
+        <div class="dropzone-inner">
+          <h1>Drop a SCORM / AICC <code>.zip</code> here</h1>
+          <p class="muted">Or pick a file from your computer to start the audit.</p>
+          <div class="dropzone-actions">
+            <label class="btn btn-primary" for="file-input">
+              Select a file
+              <input
+                type="file"
+                id="file-input"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                multiple
+                hidden
+              >
+            </label>
+            <button class="btn btn-secondary" id="sample-btn" type="button">
+              Try a sample
+            </button>
+          </div>
+          <p class="dropzone-hint muted">
+            Audits run locally. Nothing is uploaded off your machine.
+          </p>
+        </div>
+      </div>
+
+      <details class="options-panel" id="options-panel">
+        <summary>Audit options</summary>
+        <div class="options-grid">
+          <label>
+            <span>WCAG standard</span>
+            <select id="opt-standard">
+              <option value="wcag22">WCAG 2.2 AA (default)</option>
+              <option value="wcag21">WCAG 2.1 AA</option>
+            </select>
+          </label>
+          <label>
+            <span>Package type</span>
+            <select id="opt-package-type">
+              <option value="auto">Auto-detect (default)</option>
+              <option value="scorm12">SCORM 1.2</option>
+              <option value="scorm2004">SCORM 2004</option>
+              <option value="aicc">AICC</option>
+              <option value="cmi5">cmi5</option>
+              <option value="xapi">xAPI</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted options-hint">
+          Saved in your browser. Dynamic checks always use headless Chromium
+          (Firefox/WebKit don't expose the accessibility tree via CDP).
+        </p>
+      </details>
+
+      <section class="recent-panel hidden" id="recent-panel" aria-label="Recent audits">
+        <h2 class="recent-title">Recent audits</h2>
+        <ul class="recent-list" id="recent-list"></ul>
+        <p class="muted recent-hint">
+          Stored locally and persisted across restarts. Use OPEN_PATHWAYS_RETENTION_DAYS to set a retention window (default: keep forever).
+        </p>
+      </section>
+    </section>
+
+    <!-- ============================================================
+         Running: progress log + cancel
+         ============================================================ -->
+    <section class="view view-running hidden" data-view="running">
+      <div class="run-header">
+        <div>
+          <h1 id="running-title">Auditing…</h1>
+          <p class="muted" id="running-subtitle">Preparing</p>
+        </div>
+        <button class="btn btn-secondary" id="cancel-btn" type="button">Cancel</button>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <ol class="progress-log" id="progress-log" aria-live="polite"></ol>
+    </section>
+
+    <!-- ============================================================
+         Batch (Phase 8): live-updating table of jobs in a batch
+         ============================================================ -->
+    <section class="view view-batch hidden" data-view="batch">
+      <div class="run-header">
+        <div>
+          <h1 id="batch-title">Batch audit</h1>
+          <p class="muted" id="batch-subtitle">Loading…</p>
+        </div>
+        <div>
+          <button class="btn btn-secondary" id="batch-csv">Download CSV</button>
+          <button class="btn btn-link" id="batch-new">Audit another package</button>
+        </div>
+      </div>
+      <div class="batch-table-wrap">
+        <table class="batch-table" id="batch-table" aria-label="Jobs in this batch">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Package</th>
+              <th>Status</th>
+              <th>Score</th>
+              <th>Violations</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="batch-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         Done: scorecard + filters + violations
+         ============================================================ -->
+    <section class="view view-done hidden" data-view="done">
+      <div class="scorecard" id="scorecard"></div>
+
+      <div class="results-actions">
+        <button class="btn btn-secondary" id="preview-fixes">Preview fixes</button>
+        <button class="btn btn-secondary" id="download-md">Download Markdown</button>
+        <button class="btn btn-secondary" id="download-json">Download JSON</button>
+        <button class="btn btn-secondary" id="download-csv">Download CSV</button>
+        <button class="btn btn-link" id="new-audit">Audit another package</button>
+      </div>
+
+      <!-- Baseline diff (Phase 7b): pick a prior audit to compare against. -->
+      <div class="baseline-controls" id="baseline-controls">
+        <label for="baseline-select" class="muted">Compare against</label>
+        <select id="baseline-select">
+          <option value="">— none —</option>
+        </select>
+      </div>
+
+      <!-- Banner shown when a baseline filter is in effect. -->
+      <div class="baseline-banner hidden" id="baseline-banner" role="status"></div>
+
+      <div class="filters" id="filters"></div>
+      <div class="results" id="results"></div>
+    </section>
+
+    <!-- ============================================================
+         Error / not-found
+         ============================================================ -->
+    <section class="view view-error hidden" data-view="error">
+      <div class="error-card">
+        <h1 id="error-title">Something went wrong</h1>
+        <p id="error-body" class="muted"></p>
+        <button class="btn btn-primary" id="error-reset">Start over</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Full-page overlay shown while a file is being dragged into the window -->
+  <div class="drag-overlay" id="drag-overlay" aria-hidden="true">
+    <div class="drag-overlay-inner">
+      <div class="drag-overlay-icon">⬇</div>
+      <div>Drop to start the audit</div>
+    </div>
+  </div>
+
+  <!-- Phase 8: keyboard-shortcut help overlay. Toggle with `?`. -->
+  <div class="modal hidden" id="help-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title" aria-hidden="true">
+    <div class="modal-backdrop" id="help-backdrop"></div>
+    <div class="modal-card help-card">
+      <header class="modal-head">
+        <h2 id="help-title">Keyboard shortcuts</h2>
+        <button class="btn btn-link" id="help-close" type="button" aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body">
+        <dl class="kbd-list">
+          <dt><kbd>/</kbd></dt>            <dd>Focus the search field (done view)</dd>
+          <dt><kbd>j</kbd> · <kbd>k</kbd></dt> <dd>Next / previous violation</dd>
+          <dt><kbd>1</kbd>–<kbd>4</kbd></dt> <dd>Filter by severity (1=critical, 2=serious, 3=moderate, 4=minor)</dd>
+          <dt><kbd>0</kbd></dt>             <dd>Clear the severity filter</dd>
+          <dt><kbd>Esc</kbd></dt>           <dd>Close overlay / clear filters</dd>
+          <dt><kbd>?</kbd></dt>             <dd>Toggle this help</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 7a: preview-fixes modal. Shown after the user clicks
+       "Preview fixes" on the done view; lists proposed fixes grouped
+       by file, with "Apply & re-audit" / "Cancel". -->
+  <div class="modal hidden" id="fix-modal" role="dialog" aria-modal="true" aria-labelledby="fix-modal-title" aria-hidden="true">
+    <div class="modal-backdrop" id="fix-modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="fix-modal-title">Preview fixes</h2>
+        <button class="btn btn-link" id="fix-modal-close" type="button" aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body" id="fix-modal-body">
+        <p class="muted">Loading…</p>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn btn-link" id="fix-modal-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="fix-modal-apply" type="button" disabled>Apply &amp; re-audit</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

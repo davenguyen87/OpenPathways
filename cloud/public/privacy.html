@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Privacy — Open Pathways</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Open Pathways</a>
+      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+    </div>
+  </header>
+
+  <main class="static-page">
+    <h1>Privacy</h1>
+
+    <p class="muted">Last updated: 2026-05-02</p>
+
+    <h2>What we store</h2>
+    <p>
+      When you upload a package, the following is stored on the server you're
+      currently signed in to:
+    </p>
+    <ul>
+      <li>The original <code>.zip</code> file you uploaded.</li>
+      <li>
+        A row in the database recording the job — your email address (the one
+        you used to sign in), the original filename, the time of upload, the
+        WCAG standard you selected, and the resulting scorecard / violations.
+      </li>
+      <li>
+        Server logs containing your IP address, user agent, and a record of
+        each sign-in attempt (success or failure). These are kept for security
+        and abuse investigation.
+      </li>
+    </ul>
+
+    <h2>What we don't store</h2>
+    <p>
+      We do not run third-party analytics or send your data to advertising
+      networks. We do not analyze the contents of your packages for any
+      purpose other than running the audit you requested.
+    </p>
+
+    <h2>How long it's kept</h2>
+    <p>
+      Uploads and audit history are retained for the period configured by this
+      instance's operator (default: 30 days). Older entries are automatically
+      deleted, including the underlying object in storage. If the bucket
+      approaches its capacity, oldest terminal jobs are evicted earlier.
+    </p>
+
+    <h2>Who can see your data</h2>
+    <p>
+      Only you. The application enforces per-user isolation: your jobs aren't
+      visible in any other signed-in user's list, and direct attempts to fetch
+      another user's job by id return 404. The instance operator has database
+      access for backups and incident response.
+    </p>
+
+    <h2>How to delete your data</h2>
+    <p>
+      You can sign out at any time from the top right. To request deletion of
+      your account and all associated jobs, email the operator of this instance.
+      We'll confirm by replying to the email you signed up with, then remove
+      the rows and underlying objects within 30 days.
+    </p>
+
+    <h2>Security</h2>
+    <p>
+      In hosted mode, traffic is served over HTTPS. Sessions use signed,
+      <code>httpOnly</code>, <code>SameSite=Lax</code> cookies. Magic-link
+      tokens and session ids are hashed at rest. State-changing requests
+      require a CSRF token. Allowlist-restricted sign-up keeps the user set
+      bounded.
+    </p>
+
+    <p class="muted static-page-foot">
+      <a href="/about">About</a> · <a href="/terms">Terms</a>
+    </p>
+  </main>
+</body>
+</html>

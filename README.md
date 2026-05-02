@@ -6,13 +6,23 @@ Audit your courseware with a single command. No manual extraction, no LMS upload
 
 General-purpose accessibility tools (axe-core, WAVE, Pa11y) don't understand SCORM/AICC manifests, so auditing courseware before delivery is otherwise a manual, error-prone process. Open Pathways parses the manifest, extracts every HTML/CSS/JS asset, runs 21 static WCAG checks, and optionally runs 3 dynamic browser-based checks (with `--simulate`).
 
+---
+
+This repo ships three things:
+
+1. **CLI** (root) — `npx open-pathways my-course.zip`. Documented below.
+2. **Local web UI** (`web/`) — drop a `.zip` into the browser, watch progress stream in. `npm run serve`. See `web/README.md`.
+3. **Hosted multi-tenant service** (`cloud/`) — magic-link auth, S3 storage, worker queue, deploy on Coolify. See **[`cloud/DEPLOY.md`](cloud/DEPLOY.md)** for the deploy runbook.
+
+---
+
 ## Quick start
 
 ```bash
 npx open-pathways my-course.zip
 ```
 
-Output lands in `./scorm-a11y-report/` with a Markdown report, JSON scorecard, and optional SARIF results for GitHub Code Scanning. Exit code is `0` when clean, `1` when violations are found, `2` on tool error.
+Output lands in `./open-pathways-report/` with a Markdown report, JSON scorecard, and optional SARIF results for GitHub Code Scanning. Exit code is `0` when clean, `1` when violations are found, `2` on tool error.
 
 Requires Node.js 18+.
 
@@ -64,7 +74,7 @@ open-pathways <package.zip> [options]
 | `--format <format>` | Report format: `md`, `txt`, `sarif` | `md` |
 | `--json` | Print JSON scorecard to stdout only (suppresses spinner and file output) | — |
 | `--max-violations <n>` | Fail if violation count exceeds this threshold | unlimited |
-| `--output <dir>` | Output directory for reports | `./scorm-a11y-report` |
+| `--output <dir>` | Output directory for reports | `./open-pathways-report` |
 | `--package-type <type>` | `scorm12`, `scorm2004`, `aicc`, `xapi`, `auto` | `auto` |
 | `--simulate` | Run dynamic checks via headless browser (requires Playwright) | — |
 | `--standard <standard>` | WCAG version: `wcag21` or `wcag22` | `wcag22` |

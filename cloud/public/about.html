@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About — Open Pathways</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Open Pathways</a>
+      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+    </div>
+  </header>
+
+  <main class="static-page">
+    <h1>About</h1>
+
+    <p>
+      Open Pathways audits SCORM 1.2, SCORM 2004, AICC, cmi5, and xAPI packages
+      for WCAG 2.2 AA compliance. Drop a <code>.zip</code>, get back a scorecard,
+      a list of violations grouped by criterion, and a Markdown / JSON / CSV
+      report you can hand to a developer.
+    </p>
+
+    <h2>What it checks</h2>
+    <p>
+      Static checks parse the package's HTML, CSS, manifest, and SCO metadata
+      against the WCAG 2.2 AA criteria the audit core implements. Dynamic
+      checks load each entry-point in headless Chromium, capture the
+      accessibility tree via CDP, and run a second pass against the rendered
+      DOM (focus order, name/role/value, focus visibility).
+    </p>
+
+    <h2>What it doesn't do</h2>
+    <p>
+      It is not a substitute for manual review. Some criteria — meaningful
+      sequence in narrative content, alternative ways to consume video,
+      perceived contrast in custom illustrations — require a human.
+      Open Pathways flags those as <em>manual review required</em> rather
+      than guessing.
+    </p>
+
+    <h2>Open source</h2>
+    <p>
+      The audit core, the CLI, and this hosted version are all open source.
+      Issues and contributions welcome.
+    </p>
+
+    <p class="muted static-page-foot">
+      <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a>
+    </p>
+  </main>
+</body>
+</html>

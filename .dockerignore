@@ -1,0 +1,63 @@
+# Build context lives at the repo root (Dockerfile is at cloud/Dockerfile
+# but `docker build -f cloud/Dockerfile .` sees the whole repo).
+#
+# Keep: src/, cloud/server/, cloud/public/, cloud/worker/, package*.json,
+# cloud/package*.json. Drop everything else.
+
+# Version control + editor + OS junk
+.git
+.gitattributes
+.gitignore
+.githooks
+.editorconfig
+.idea
+.vscode
+.DS_Store
+*.swp
+
+# Local node_modules — the Dockerfile runs `npm ci` itself
+node_modules
+*/node_modules
+**/node_modules
+
+# Local build/runtime artifacts
+.tmp
+*/.tmp
+**/.tmp
+**/*.log
+**/*.sqlite
+**/*.sqlite-journal
+**/*.sqlite-wal
+**/*.sqlite-shm
+
+# Env / secrets — must never be in the image
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+
+# /web is the v1 local-only tool; never goes in the cloud image
+web
+
+# Test fixtures + scaffolding the runtime image doesn't need
+test
+docs
+screenshots
+
+# Coverage + tooling outputs
+coverage
+.npm
+.cache
+
+# Anything inside cloud/ that isn't shipped
+cloud/.tmp
+cloud/test
+cloud/screenshots
+cloud/CLAUDE.md
+cloud/ROADMAP.md
+cloud/DEPLOY.md
+cloud/README.md
+cloud/.gitignore
+cloud/Dockerfile
+cloud/docker-compose.yml

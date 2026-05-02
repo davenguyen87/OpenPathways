@@ -1,0 +1,150 @@
+# Open Pathways Cloud — local hosted-mode dev via docker-compose.
+#
+#   docker compose -f cloud/docker-compose.yml up
+#
+# Brings up Postgres + MinIO + the web container + a worker container,
+# all with the same env contract production uses. Edit cloud/.env first
+# (copy from cloud/.env.example).
+#
+# Production deploy is on Coolify and does not use this file directly —
+# Coolify provisions Postgres/MinIO as managed services and runs the web
+# + worker as separate Coolify "applications" pointed at the same image.
+# See cloud/DEPLOY.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openpathways}
+      POSTGRES_USER: ${POSTGRES_USER:-openpathways}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openpathways}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openpathways} -d ${POSTGRES_DB:-openpathways}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot bucket creator. Runs on `up`, creates the bucket if missing,
+  # then exits. The `mc` (MinIO client) image handles this idiomatically.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-op-uploads} &&
+      echo 'bucket ${S3_BUCKET:-op-uploads} ready'
+      "
+
+  web:
+    build:
+      context: ..
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      OPEN_PATHWAYS_MODE: hosted
+      OPEN_PATHWAYS_PORT: "4280"
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER:-openpathways}:${POSTGRES_PASSWORD:-openpathways}@postgres:5432/${POSTGRES_DB:-openpathways}
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-op-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION: us-east-1
+      WORKER_QUEUE: pgboss
+      RATE_LIMIT_STORE: postgres
+      SESSION_SECRET: ${SESSION_SECRET}
+      ALLOWLIST_EMAIL_DOMAINS: ${ALLOWLIST_EMAIL_DOMAINS:-}
+      ALLOWLIST_EMAILS: ${ALLOWLIST_EMAILS:-}
+      # Use MAIL_CAPTURE_DIR for local dev (writes "sent" emails to disk
+      # the host can read) OR fill in SMTP_* for a real send.
+      MAIL_CAPTURE_DIR: /var/op/mail
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Open Pathways <noreply@example.com>}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      OPEN_PATHWAYS_RETENTION_DAYS: ${OPEN_PATHWAYS_RETENTION_DAYS:-30}
+      QUOTA_CONCURRENT_JOBS: ${QUOTA_CONCURRENT_JOBS:-2}
+      QUOTA_UPLOADS_PER_DAY: ${QUOTA_UPLOADS_PER_DAY:-50}
+      QUOTA_STORED_BYTES: ${QUOTA_STORED_BYTES:-5368709120}
+      QUOTA_STORED_BYTES_TOTAL: ${QUOTA_STORED_BYTES_TOTAL:-0}
+      OPEN_PATHWAYS_BEHIND_TLS: ${OPEN_PATHWAYS_BEHIND_TLS:-false}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:4280}
+    ports:
+      - "127.0.0.1:4280:4280"
+    volumes:
+      - ./.tmp/mail:/var/op/mail
+
+  worker:
+    build:
+      context: ..
+      dockerfile: cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    command: ["node", "cloud/worker/index.js"]
+    environment:
+      # Mirror the web container's env. In production these come from
+      # Coolify's secrets UI, identical for both apps.
+      OPEN_PATHWAYS_MODE: hosted
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER:-openpathways}:${POSTGRES_PASSWORD:-openpathways}@postgres:5432/${POSTGRES_DB:-openpathways}
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-op-uploads}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION: us-east-1
+      WORKER_QUEUE: pgboss
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ALLOWLIST_EMAIL_DOMAINS: ${ALLOWLIST_EMAIL_DOMAINS:-}
+      ALLOWLIST_EMAILS: ${ALLOWLIST_EMAILS:-}
+      MAIL_CAPTURE_DIR: /var/op/mail
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: "2"
+    volumes:
+      - ./.tmp/mail:/var/op/mail
+
+volumes:
+  pgdata:
+  miniodata:
