@@ -15,16 +15,20 @@ services:
       context: .
       dockerfile: cloud/Dockerfile
     restart: unless-stopped
+    # Run as root so we can bind to port 80 (Coolify's default proxy
+    # target). The Playwright base image's pwuser can't bind low ports.
+    # No sensitive on-disk state in the container that warrants pwuser
+    # isolation — uploads go to MinIO, sessions+jobs to Postgres.
+    user: root
     depends_on:
       minio-init:
         condition: service_completed_successfully
     environment:
-      # Coolify magic env: tells Traefik to route the public FQDN to
-      # web:4280. The value is auto-generated from the application's
-      # configured domain (see Coolify's "Magic Environment Variables").
-      SERVICE_FQDN_WEB_4280:
       OPEN_PATHWAYS_MODE: hosted
-      OPEN_PATHWAYS_PORT: "4280"
+      # Listen on port 80 inside the container so Coolify's auto-Traefik
+      # routing (which targets port 80 by default for docker-compose
+      # apps) reaches us without needing docker_compose_domains config.
+      OPEN_PATHWAYS_PORT: "80"
       OPEN_PATHWAYS_BEHIND_TLS: ${OPEN_PATHWAYS_BEHIND_TLS:-true}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       DB_DRIVER: postgres
@@ -53,9 +57,9 @@ services:
       QUOTA_STORED_BYTES: ${QUOTA_STORED_BYTES:-5368709120}
       QUOTA_STORED_BYTES_TOTAL: ${QUOTA_STORED_BYTES_TOTAL:-0}
     expose:
-      - "4280"
+      - "80"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4280/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:80/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
