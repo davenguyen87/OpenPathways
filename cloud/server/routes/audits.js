@@ -124,7 +124,7 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
     if (isHosted && store) {
       const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
       const verdict = await quotas.check({
-        store, userId: req.user.id,
+        store, userId: (req.user && req.user.id) || '__no_user__',
         addingCount: files.length,
         addingBytes: totalBytes,
         config: quotaConfig,
@@ -290,7 +290,7 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
     // rejection so a 429 doesn't leak storage.
     if (isHosted && store) {
       const verdict = await quotas.check({
-        store, userId: req.user.id, addingBytes: uploadBytes || 0, config: quotaConfig,
+        store, userId: (req.user && req.user.id) || '__no_user__', addingBytes: uploadBytes || 0, config: quotaConfig,
       });
       if (!verdict.allowed) {
         try { fs.unlinkSync(req.file.path); } catch (_) {}

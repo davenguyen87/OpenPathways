@@ -19,6 +19,13 @@
 set -u
 set -o pipefail
 
+# Skip this auth-specific test when auth is disabled (AUTH_ADAPTER=none).
+# This test asserts auth is required; it's not meaningful when auth is off.
+if [[ "${AUTH_ADAPTER:-magic-link}" == "none" ]]; then
+  echo "[skip] AUTH_ADAPTER=none — skipping auth-specific test" >&2
+  exit 0
+fi
+
 PORT="${PORT:-4297}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FIXTURE="${FIXTURE:-$ROOT/test/fixtures/scorm12-clean.zip}"

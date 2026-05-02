@@ -78,6 +78,10 @@ cloud/
 - Email allowlist (`ALLOWLIST_EMAIL_DOMAINS` or `ALLOWLIST_EMAILS`) **required**
   in hosted mode — refuses to start without it.
 - `AUTH_ADAPTER=none` only valid when `OPEN_PATHWAYS_MODE=local`.
+- **Temporary deviation (testing window):** `AUTH_ADAPTER=none` is currently allowed
+  in hosted mode for the testing phase. This is gated by an explicit env var and
+  reversible by removing it or setting to `magic-link`. Re-evaluate before opening
+  to additional users.
 
 **Hardening (hosted mode).**
 - `helmet` for security headers (HSTS, CSP, X-Frame-Options DENY).

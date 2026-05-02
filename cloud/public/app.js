@@ -1001,10 +1001,18 @@
     } catch (_) { auth.mode = 'local'; }
   }
 
-  async function loadCurrentUser() {
+async function loadCurrentUser() {
     if (auth.mode !== 'hosted') return null;
     try {
       const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      // When AUTH_ADAPTER=none, /api/auth/me is not mounted and returns 404.
+      // Treat 404 as "auth disabled" and allow access without login.
+      if (r.status === 404) {
+        auth.user = { id: '__anonymous__', email: 'Anonymous (testing)' };
+        auth.csrfToken = null; // CSRF not needed when auth is off
+        renderTopbarUser();
+        return auth.user;
+      }
       if (r.status === 401) { auth.user = null; auth.csrfToken = null; return null; }
       if (!r.ok) { auth.user = null; auth.csrfToken = null; return null; }
       const j = await r.json();

@@ -18,6 +18,15 @@ function createAuth({ mode, store }) {
     return { auth: new NoneAuth(), allowlist: null };
   }
   if (mode === 'hosted') {
+    // TEMPORARY DEVIATION (testing window): AUTH_ADAPTER=none disables auth in
+    // hosted mode. This is a conscious deviation from CLAUDE.md's locked-in decision
+    // that auth is mandatory in hosted mode. Re-evaluate before opening to users.
+    // Flip back: remove or unset AUTH_ADAPTER, set ALLOWLIST + SMTP, redeploy.
+    if (process.env.AUTH_ADAPTER === 'none') {
+      console.warn('[auth] AUTH_ADAPTER=none — authentication is DISABLED. All requests are unauthenticated. Anyone with the URL can use this instance.');
+      return { auth: new NoneAuth(), allowlist: null };
+    }
+
     const allowlist = Allowlist.fromEnv();
     if (allowlist.isEmpty()) {
       throw new Error(

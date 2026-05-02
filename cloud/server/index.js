@@ -197,9 +197,12 @@ function createApp({ jobs, config, auth, store, storage }) {
   }
 
   // ---- Phase 9B: cookie + auth + csrf middleware (hosted only) ----
+
+  // ---- Phase 9B: cookie + auth + csrf middleware (hosted only) ----
   let csrf = null;
   let csrfProtect = null;
-  if (cfg.isHosted) {
+  const authEnabled = auth.driver() !== 'none';
+  if (cfg.isHosted && authEnabled) {
     app.use(cookieParser(process.env.SESSION_SECRET));
     app.set('trust proxy', 1); // Coolify+Caddy/Traefik sit in front
     csrf = buildCsrf({
@@ -208,6 +211,11 @@ function createApp({ jobs, config, auth, store, storage }) {
     });
     csrfProtect = csrf.doubleCsrfProtection;
     app.use(attachUser({ auth }));
+  } else if (cfg.isHosted && !authEnabled) {
+    // AUTH_ADAPTER=none: still set trust proxy and mount helmet security headers,
+    // but skip auth middleware and CSRF (since there are no sessions to protect).
+    app.use(cookieParser(process.env.SESSION_SECRET));
+    app.set('trust proxy', 1);
   }
 
   app.get('/api/version', (_req, res) => {
@@ -242,8 +250,9 @@ function createApp({ jobs, config, auth, store, storage }) {
     res.status(ok ? 200 : 503).json(result);
   });
 
-  // Auth routes (hosted only).
-  if (cfg.isHosted) {
+  // Auth routes (hosted only, and only when auth is enabled).
+  // When AUTH_ADAPTER=none, skip /api/auth/* routes entirely.
+  if (cfg.isHosted && authEnabled) {
     const { router: authRouter } = createAuthRouter({
       auth,
       allowlist: auth.allowlist || null,
@@ -257,8 +266,8 @@ function createApp({ jobs, config, auth, store, storage }) {
   const { router: auditRouter } = createAuditRouter({
     jobs,
     config: cfg,
-    requireAuth: cfg.isHosted ? requireAuth() : null,
-    csrfProtect,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
     store,
   });
   app.use('/api', auditRouter);
@@ -268,7 +277,6 @@ function createApp({ jobs, config, auth, store, storage }) {
 
   // SPA catch-all for /job/:id and any future client-side routes.
   app.use((req, res, next) => {
-    if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(publicDir, 'index.html'));
   });

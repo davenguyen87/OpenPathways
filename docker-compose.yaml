@@ -25,6 +25,10 @@ services:
         condition: service_completed_successfully
     environment:
       OPEN_PATHWAYS_MODE: hosted
+      # Auth adapter. `magic-link` (default) requires ALLOWLIST_* + SMTP_*.
+      # `none` disables auth entirely — TESTING ONLY; anyone with the URL
+      # gets in. Flip back to magic-link by removing this var in Coolify.
+      AUTH_ADAPTER: ${AUTH_ADAPTER:-magic-link}
       # Listen on port 80 inside the container so Coolify's auto-Traefik
       # routing (which targets port 80 by default for docker-compose
       # apps) reaches us without needing docker_compose_domains config.
@@ -84,6 +88,9 @@ services:
     command: ["node", "cloud/worker/index.js"]
     environment:
       OPEN_PATHWAYS_MODE: hosted
+      # Match the web service's auth adapter so the worker's allowlist /
+      # SMTP guards mirror what the web side enforces.
+      AUTH_ADAPTER: ${AUTH_ADAPTER:-magic-link}
       DB_DRIVER: postgres
       DATABASE_URL: ${DATABASE_URL}
       STORAGE_DRIVER: s3
