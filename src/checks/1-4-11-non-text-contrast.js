@@ -208,12 +208,16 @@ module.exports = {
           if (ratio < minRatio) {
             const html = $.html(el).slice(0, 150);
             const line = lineOf(htmlFile.content, html);
+            // When the rendered HTML doesn't byte-match the source (cheerio
+            // normalization), line is null. Show the rendered element as the
+            // snippet rather than an empty string or a misleading source line.
+            const snip = line !== null ? snippet(htmlFile.content, line, 200) : html;
 
             violations.push({
               file: htmlFile.path,
               line,
               column: null,
-              snippet: snippet(htmlFile.content, line, 200),
+              snippet: snip,
               message: `UI component (${tag}) has insufficient contrast ratio ${ratio.toFixed(2)}:1, below WCAG AA minimum of 3:1. Ensure component indicators (border, outline, background) contrast with adjacent colors.`,
               severity: 'serious',
               criterion: '1.4.11'

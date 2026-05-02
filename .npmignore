@@ -42,7 +42,7 @@ build/
 *~
 
 # Output directories (from local runs)
-scorm-a11y-report/
+open-pathways-report/
 
 # This file itself
 .npmignore

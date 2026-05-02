@@ -11,6 +11,8 @@ function renderMarkdown(scorecard) {
     packageType,
     packagePath,
     scannedAt,
+    complete,
+    incompleteReason,
     passed,
     score,
     summary,
@@ -26,8 +28,18 @@ function renderMarkdown(scorecard) {
 
   let md = '';
 
+  // Loud INCOMPLETE banner (rendered before anything else so it's impossible
+  // to mistake a partial audit for a clean pass).
+  if (complete === false) {
+    md += `> ⚠️ **REPORT INCOMPLETE — dynamic accessibility checks did not run.**\n`;
+    md += `> Reason: ${incompleteReason || 'unknown'}\n`;
+    md += `> Static checks completed below, but the package has not been fully audited. Resolve the issue and re-run before relying on this report.\n\n`;
+  }
+
   // Title + summary
-  const badge = passed ? '✅ PASSED' : '❌ FAILED';
+  const badge = complete === false
+    ? '⚠️ INCOMPLETE'
+    : passed ? '✅ PASSED' : '❌ FAILED';
   md += `# WCAG 2.2 AA Compliance Report\n\n`;
   md += `**Status:** ${badge}\n`;
   md += `**Score:** ${score !== null ? score + '%' : 'N/A'}\n`;
@@ -58,18 +70,13 @@ function renderMarkdown(scorecard) {
 
   md += `\n`;
 
-  // Phase 3: Dynamic checks status (only render when --simulate was attempted)
-  if (dynamicChecksRun === true || dynamicCheckSkipReason) {
-    md += `## Dynamic Checks (Screen Reader Simulation)\n\n`;
-    if (dynamicChecksRun === true) {
-      md += `Status: **ran** — Playwright loaded each entry-point HTML and walked the Accessibility Tree. Findings for 2.4.3, 3.2.4, and 4.1.3 are included in the violations section above.\n\n`;
-    } else {
-      md += `Status: **skipped** — ${dynamicCheckSkipReason || 'unknown reason'}.\n\n`;
-      if (dynamicCheckSkipReason && /playwright/i.test(dynamicCheckSkipReason)) {
-        md += `To enable dynamic checks, install Playwright in the consuming project:\n\n`;
-        md += `\`\`\`bash\nnpm install playwright\nnpx playwright install chromium\n\`\`\`\n\n`;
-      }
-    }
+  // Dynamic checks status (always rendered — dynamic is mandatory).
+  md += `## Dynamic Checks (Screen Reader Simulation)\n\n`;
+  if (dynamicChecksRun === true) {
+    md += `Status: **ran** — Playwright loaded each entry-point HTML and walked the Accessibility Tree. Dynamic findings are included in the violations section above.\n\n`;
+  } else {
+    md += `Status: **did not run** — ${dynamicCheckSkipReason || 'unknown reason'}.\n\n`;
+    md += `Dynamic checks are mandatory in this build. Coverage of focus order, accessible names, and visible focus indicators is missing from this report. Resolve the issue and re-run.\n\n`;
   }
 
   // Phase 3: Fixes applied (only render when --fix or --fix-dry-run was used)

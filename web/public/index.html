@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Open Pathways Web</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Open Pathways</a>
+      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+    </div>
+    <div class="topbar-meta" id="topbar-meta"></div>
+  </header>
+
+  <main id="view-root">
+    <!-- ============================================================
+         Idle: drop zone + file picker + try-a-sample
+         ============================================================ -->
+    <section class="view view-idle" data-view="idle">
+      <div class="dropzone" id="dropzone" role="region" aria-label="Drop a SCORM or AICC zip here">
+        <div class="dropzone-inner">
+          <h1>Drop a SCORM / AICC <code>.zip</code> here</h1>
+          <p class="muted">Or pick a file from your computer to start the audit.</p>
+          <div class="dropzone-actions">
+            <label class="btn btn-primary" for="file-input">
+              Select a file
+              <input
+                type="file"
+                id="file-input"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                hidden
+              >
+            </label>
+            <button class="btn btn-secondary" id="sample-btn" type="button">
+              Try a sample
+            </button>
+          </div>
+          <p class="dropzone-hint muted">
+            Audits run locally. Nothing is uploaded off your machine.
+          </p>
+        </div>
+      </div>
+
+      <details class="options-panel" id="options-panel">
+        <summary>Audit options</summary>
+        <div class="options-grid">
+          <label>
+            <span>WCAG standard</span>
+            <select id="opt-standard">
+              <option value="wcag22">WCAG 2.2 AA (default)</option>
+              <option value="wcag21">WCAG 2.1 AA</option>
+            </select>
+          </label>
+          <label>
+            <span>Package type</span>
+            <select id="opt-package-type">
+              <option value="auto">Auto-detect (default)</option>
+              <option value="scorm12">SCORM 1.2</option>
+              <option value="scorm2004">SCORM 2004</option>
+              <option value="aicc">AICC</option>
+              <option value="cmi5">cmi5</option>
+              <option value="xapi">xAPI</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted options-hint">
+          Saved in your browser. Dynamic checks always use headless Chromium
+          (Firefox/WebKit don't expose the accessibility tree via CDP).
+        </p>
+      </details>
+
+      <section class="recent-panel hidden" id="recent-panel" aria-label="Recent audits">
+        <h2 class="recent-title">Recent audits</h2>
+        <ul class="recent-list" id="recent-list"></ul>
+        <p class="muted recent-hint">
+          Kept in memory until the server restarts (cleared 10 minutes after each run).
+        </p>
+      </section>
+    </section>
+
+    <!-- ============================================================
+         Running: progress log + cancel
+         ============================================================ -->
+    <section class="view view-running hidden" data-view="running">
+      <div class="run-header">
+        <div>
+          <h1 id="running-title">Auditing…</h1>
+          <p class="muted" id="running-subtitle">Preparing</p>
+        </div>
+        <button class="btn btn-secondary" id="cancel-btn" type="button">Cancel</button>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <ol class="progress-log" id="progress-log" aria-live="polite"></ol>
+    </section>
+
+    <!-- ============================================================
+         Done: scorecard + filters + violations
+         ============================================================ -->
+    <section class="view view-done hidden" data-view="done">
+      <div class="scorecard" id="scorecard"></div>
+
+      <div class="results-actions">
+        <button class="btn btn-secondary" id="download-md">Download Markdown</button>
+        <button class="btn btn-secondary" id="download-json">Download JSON</button>
+        <button class="btn btn-link" id="new-audit">Audit another package</button>
+      </div>
+
+      <div class="filters" id="filters"></div>
+      <div class="results" id="results"></div>
+    </section>
+
+    <!-- ============================================================
+         Error / not-found
+         ============================================================ -->
+    <section class="view view-error hidden" data-view="error">
+      <div class="error-card">
+        <h1 id="error-title">Something went wrong</h1>
+        <p id="error-body" class="muted"></p>
+        <button class="btn btn-primary" id="error-reset">Start over</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Full-page overlay shown while a file is being dragged into the window -->
+  <div class="drag-overlay" id="drag-overlay" aria-hidden="true">
+    <div class="drag-overlay-inner">
+      <div class="drag-overlay-icon">⬇</div>
+      <div>Drop to start the audit</div>
+    </div>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

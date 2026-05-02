@@ -168,6 +168,14 @@ function buildScorecard({ violations, manualReview, options, checks, scos, dynam
     return enriched;
   });
 
+  // An audit is "complete" only when the dynamic-check pass actually ran.
+  // If Playwright/Chromium couldn't be set up, static checks still produce
+  // results, but consumers (CI, dashboards) need to know the run is partial.
+  const auditComplete = !!(dynamicReport && dynamicReport.skipped === false);
+  const incompleteReason = auditComplete
+    ? null
+    : (dynamicReport && dynamicReport.reason) || 'dynamic checks did not run';
+
   // Build scorecard
   const scorecard = {
     tool: 'open-pathways',
@@ -176,6 +184,8 @@ function buildScorecard({ violations, manualReview, options, checks, scos, dynam
     packageType,
     packagePath,
     scannedAt: new Date().toISOString(),
+    complete: auditComplete,
+    incompleteReason,
     passed,
     score,
     summary,

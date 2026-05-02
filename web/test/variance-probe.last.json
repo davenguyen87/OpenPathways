@@ -1,0 +1,147 @@
+{
+  "fixture": "scorm12-clean.zip",
+  "N": 20,
+  "totalMs": 12845,
+  "runs": [
+    {
+      "ms": 745,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 640,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 632,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 628,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 640,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 639,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 630,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 621,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 631,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 629,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 637,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 630,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 639,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 650,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 649,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 646,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 623,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 625,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 658,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    },
+    {
+      "ms": 653,
+      "score": 100,
+      "total": 0,
+      "hash": "e3b0c44298fc",
+      "complete": true
+    }
+  ]
+}

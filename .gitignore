@@ -2,7 +2,6 @@
 node_modules/
 
 # Output / generated
-scorm-a11y-report/
 open-pathways-report/
 *.scorm-fixed.zip
 *.tgz

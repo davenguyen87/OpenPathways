@@ -26,7 +26,7 @@ async function writeReports(config) {
   const {
     json: jsonOnly = false,
     format = 'md',
-    output = './scorm-a11y-report',
+    output = './open-pathways-report',
     standard = 'wcag22',
     packageType,
     packagePath,

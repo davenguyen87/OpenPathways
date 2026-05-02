@@ -22,9 +22,8 @@ program
   .option('--format <format>', 'Report format: md|txt (default: md)', 'md')
   .option('--json', 'Output JSON scorecard to stdout only (suppresses spinner/logs)')
   .option('--max-violations <n>', 'Maximum violations allowed before failing (default: unlimited)', null)
-  .option('--output <dir>', 'Output directory for reports (default: ./scorm-a11y-report)', './scorm-a11y-report')
+  .option('--output <dir>', 'Output directory for reports (default: ./open-pathways-report)', './open-pathways-report')
   .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
-  .option('--simulate', 'Run dynamic checks via headless browser (requires playwright)')
   .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag22)', 'wcag22')
   .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
   .parse(process.argv);
@@ -55,12 +54,12 @@ const packagePath = program.args[0];
       auditResult = await audit(packagePath, {
         packageType: opts.packageType,
         standard: opts.standard,
-        simulate: opts.simulate,
         browser: opts.browser,
         timeoutDynamic: opts.timeoutDynamic ? parseInt(opts.timeoutDynamic, 10) : 30000,
         fix: opts.fix,
         fixDryRun: opts.fixDryRun,
         packagePath,
+        jsonOnly: isJsonOnly,
       });
     } catch (err) {
       if (spinner) spinner.stop();
@@ -166,7 +165,27 @@ const packagePath = program.args[0];
       }
     }
 
-    // Determine exit code
+    // Determine exit code.
+    // INCOMPLETE audits (dynamic checks could not run) take precedence over
+    // violation counts: a partial audit must not be mistaken for a clean pass,
+    // so we exit 2 (tool error) regardless of the violation count.
+    const dyn = auditResult.dynamicReport || {};
+    if (dyn.skipped) {
+      if (!isJsonOnly) {
+        console.log(
+          kleur.yellow(
+            `⚠ REPORT INCOMPLETE: dynamic checks did not run — ${dyn.reason || 'unknown reason'}`
+          )
+        );
+        console.log(
+          kleur.yellow(
+            '  Static checks completed, but dynamic accessibility coverage is missing. Resolve the issue above and re-run.'
+          )
+        );
+      }
+      process.exit(2);
+    }
+
     const maxViolations = opts.maxViolations ? parseInt(opts.maxViolations, 10) : null;
     const violationCount = auditResult.violations.length;
 

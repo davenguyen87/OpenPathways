@@ -1,0 +1,22 @@
+{
+  "name": "open-pathways-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local web UI for the Open Pathways SCORM/AICC accessibility auditor",
+  "main": "server/index.js",
+  "bin": {
+    "open-pathways-web": "server/index.js"
+  },
+  "scripts": {
+    "serve": "node server/index.js",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "open": "^8.4.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
