@@ -79,11 +79,14 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
   const quotaConfig = isHosted ? quotas.readQuotaConfig() : null;
 
   // Helper: ownership filter to pass into store/job-manager calls.
-  // - hosted mode: filter by current user's id (always set; requireAuth gates).
+  // - hosted mode with auth: filter by current user's id (always set; requireAuth gates).
+  // - hosted mode with AUTH_ADAPTER=none: no filter (single shared tenant);
+  //   uploads write user_id=NULL, so a "__no_user__" filter would never match.
   // - local mode: undefined (no filter), so legacy NULL rows remain visible.
+  const authDisabled = !requireAuth;
   const ownerFilter = (req) => {
-    if (!isHosted) return undefined;
-    return { userId: (req.user && req.user.id) || "__no_user__" };
+    if (!isHosted || authDisabled) return undefined;
+    return { userId: req.user.id };
   };
 
   // Compose middleware chains conditionally.
