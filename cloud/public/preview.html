@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Open Pathways — Design Preview</title>
+  <script>(function(){try{var t=localStorage.getItem('op-theme');var p=(t==='light'||t==='dark')?t:'auto';var r=(p==='auto')?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;var d=document.documentElement;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);}catch(e){}})();</script>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    /* Preview-only chrome to show every view stacked, with section labels */
+    .pv-section {
+      padding: 2.5rem 1.5rem 1.5rem;
+      border-top: 1px solid var(--rule);
+      max-width: 60rem;
+      margin: 0 auto;
+    }
+    .pv-section:first-of-type { border-top: none; }
+    .pv-label {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin: 0 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--rule);
+    }
+    .pv-section .view { animation: none; }
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    .swatch {
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#pv">Skip to main content</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Open Pathways</a>
+      <span class="brand-tag">Design preview &middot; all views</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="topbar-user">consultant@studio.example</span>
+      <button class="btn btn-link" type="button">Sign out</button>
+      <button class="theme-toggle" id="theme-toggle" type="button"
+              aria-label="Theme: auto, matches your system. Activate to switch to light.">
+        <svg class="theme-icon theme-icon-auto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="pv">
+
+    <!-- IDLE -->
+    <section class="pv-section">
+      <p class="pv-label">01 &middot; Idle (drop zone)</p>
+      <div class="view">
+        <div class="dropzone">
+          <div class="dropzone-inner">
+            <h1>Drop a learning package &mdash; or pick one to audit.</h1>
+            <p>
+              Open Pathways audits SCORM, AICC, cmi5, and xAPI <code>.zip</code> files
+              against WCAG&nbsp;2.2 AA. You&rsquo;ll get a scorecard, violations grouped
+              by criterion, and a Markdown / JSON / CSV report.
+            </p>
+            <div class="dropzone-actions">
+              <button class="btn btn-primary" type="button">Select a file</button>
+              <button class="btn btn-secondary" type="button">Try a sample</button>
+            </div>
+            <p class="dropzone-hint">
+              Files stay on this instance. Audit history retained per the operator&rsquo;s retention window.
+            </p>
+          </div>
+        </div>
+
+        <details class="options-panel" open>
+          <summary>Audit options</summary>
+          <div class="options-grid">
+            <label><span>WCAG standard</span>
+              <select><option>WCAG 2.2 AA (default)</option></select></label>
+            <label><span>Package type</span>
+              <select><option>Auto-detect (default)</option></select></label>
+          </div>
+          <p class="muted options-hint">Saved in your browser. Dynamic checks always use headless Chromium.</p>
+        </details>
+
+        <section class="recent-panel" style="display:block">
+          <h2 class="recent-title">Recent audits</h2>
+          <ul class="recent-list">
+            <li><a class="recent-item" href="#">
+              <span class="recent-badge ok">92%</span>
+              <span class="recent-name">capstone-onboarding-v3.zip</span>
+              <span class="recent-meta">May 2 · WCAG22</span>
+              <span class="recent-meta">&rarr;</span></a></li>
+            <li><a class="recent-item" href="#">
+              <span class="recent-badge fail">FAIL</span>
+              <span class="recent-name">compliance-101-build-04.zip</span>
+              <span class="recent-meta">May 1 · WCAG22</span>
+              <span class="recent-meta">&rarr;</span></a></li>
+            <li><a class="recent-item" href="#">
+              <span class="recent-badge run">RUN</span>
+              <span class="recent-name">harassment-prevention-2026.zip</span>
+              <span class="recent-meta">May 1 · WCAG22</span>
+              <span class="recent-meta">&rarr;</span></a></li>
+          </ul>
+        </section>
+      </div>
+    </section>
+
+    <!-- RUNNING -->
+    <section class="pv-section">
+      <p class="pv-label">02 &middot; Running</p>
+      <div class="view">
+        <div class="run-header">
+          <div>
+            <h1>Auditing capstone-onboarding-v3.zip</h1>
+            <p class="muted">Running dynamic checks on entry-point 3 of 4</p>
+          </div>
+          <button class="btn btn-secondary" type="button">Cancel</button>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width:62%"></div></div>
+        <ol class="progress-log">
+          <li><span class="stage">extract</span> · 41 files, 8.3MB</li>
+          <li><span class="stage">manifest</span> · SCORM 2004 4th edition</li>
+          <li><span class="stage">static-checks</span> · 312 nodes scanned, 9 violation(s)</li>
+          <li class="now"><span class="stage">dynamic-checks</span> · loading entry-point 3/4</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- DONE -->
+    <section class="pv-section">
+      <p class="pv-label">03 &middot; Done (results)</p>
+      <div class="view">
+        <div class="scorecard">
+          <div class="score-circle fail">62%</div>
+          <div class="scorecard-meta">
+            <div class="scorecard-headline">14 violations across 6 criteria</div>
+            <div class="muted">Audited May 2, 2026 · 14:08 PDT</div>
+            <div class="scorecard-tags">
+              <span class="tag">WCAG 2.2</span>
+              <span class="tag">scorm2004</span>
+              <span class="tag">23/29 criteria pass</span>
+              <span class="tag tag-danger">3 critical</span>
+              <span class="tag tag-warn">5 serious</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-actions">
+          <button class="btn btn-secondary" type="button">Preview fixes</button>
+          <button class="btn btn-secondary" type="button">Download Markdown</button>
+          <button class="btn btn-secondary" type="button">Download JSON</button>
+          <button class="btn btn-secondary" type="button">Download CSV</button>
+          <button class="btn btn-link" type="button">Audit another package</button>
+        </div>
+
+        <div class="baseline-controls">
+          <label class="muted" for="bl">Compare against</label>
+          <select id="bl"><option>capstone-onboarding-v2.zip · May 1, 14:02</option></select>
+        </div>
+
+        <div class="filters">
+          <label><span>Severity</span>
+            <select><option>all</option></select></label>
+          <label><span>Criterion</span>
+            <select><option>all</option></select></label>
+          <label><span>File</span>
+            <select><option>all</option></select></label>
+          <label><span>Search</span>
+            <input type="search" placeholder="Search messages…"></label>
+          <span class="filter-counts">14 of 14 violations</span>
+        </div>
+
+        <div class="results">
+          <div class="criterion-group open">
+            <button class="criterion-summary" type="button">
+              <span class="chev">&#9656;</span>
+              <span class="criterion-id">1.1.1</span>
+              <span class="criterion-name">Non-text content</span>
+              <span class="criterion-count">3</span>
+            </button>
+            <div class="criterion-body">
+              <div class="violation">
+                <div class="violation-head">
+                  <span class="severity severity-critical">critical</span>
+                  <span class="violation-file">module-02/img/diagram-flow.png</span>
+                  <span class="tag">SCO mod-02</span>
+                </div>
+                <p class="violation-message">
+                  Image is missing an accessible name. <code>alt=""</code> is acceptable
+                  only for purely decorative imagery. This image is referenced by a
+                  caption that describes its content, suggesting it conveys meaning.
+                </p>
+                <pre class="violation-snippet">&lt;img src="diagram-flow.png" alt=""&gt;
+&lt;p class="caption"&gt;Three-step approval workflow.&lt;/p&gt;</pre>
+                <div class="violation-actions">
+                  <button class="btn btn-secondary" type="button">Copy as Markdown</button>
+                  <a class="btn btn-link" href="#">WCAG ref &#8599;</a>
+                </div>
+              </div>
+              <div class="violation">
+                <div class="violation-head">
+                  <span class="severity severity-serious">serious</span>
+                  <span class="violation-file">module-04/img/cert-seal.svg</span>
+                  <span class="tag">heuristic</span>
+                </div>
+                <p class="violation-message">
+                  SVG has no <code>&lt;title&gt;</code> child and no
+                  <code>aria-label</code>. Decorative? Add <code>role="presentation"</code>.
+                </p>
+                <div class="violation-actions">
+                  <button class="btn btn-secondary" type="button">Copy as Markdown</button>
+                  <a class="btn btn-link" href="#">WCAG ref &#8599;</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="criterion-group open">
+            <button class="criterion-summary" type="button">
+              <span class="chev">&#9656;</span>
+              <span class="criterion-id">1.4.3</span>
+              <span class="criterion-name">Contrast (minimum)</span>
+              <span class="criterion-count">4</span>
+            </button>
+            <div class="criterion-body">
+              <div class="violation">
+                <div class="violation-head">
+                  <span class="severity severity-moderate">moderate</span>
+                  <span class="violation-file">shared/styles/theme.css:212</span>
+                </div>
+                <p class="violation-message">
+                  Body text contrast is 3.4:1 (foreground <code>#777</code> on
+                  <code>#fff</code>). WCAG AA requires 4.5:1 for normal text.
+                </p>
+                <div class="violation-actions">
+                  <button class="btn btn-secondary" type="button">Copy as Markdown</button>
+                </div>
+              </div>
+              <div class="violation">
+                <div class="violation-head">
+                  <span class="severity severity-minor">minor</span>
+                  <span class="violation-file">module-01/quiz.html:48</span>
+                </div>
+                <p class="violation-message">
+                  Disabled-state button contrast is 2.6:1. WCAG doesn&rsquo;t require
+                  contrast on disabled controls, but check that affordance is
+                  preserved.
+                </p>
+                <div class="violation-actions">
+                  <button class="btn btn-secondary" type="button">Copy as Markdown</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BATCH -->
+    <section class="pv-section">
+      <p class="pv-label">04 &middot; Batch</p>
+      <div class="view">
+        <div class="run-header">
+          <div>
+            <h1>Batch audit</h1>
+            <p class="muted">3 of 4 complete</p>
+          </div>
+          <div>
+            <button class="btn btn-secondary" type="button">Download CSV</button>
+            <button class="btn btn-link" type="button">Audit another package</button>
+          </div>
+        </div>
+        <div class="batch-table-wrap">
+          <table class="batch-table">
+            <thead><tr>
+              <th>#</th><th>Package</th><th>Status</th><th>Score</th><th>Violations</th><th></th>
+            </tr></thead>
+            <tbody>
+              <tr><td>1</td><td class="batch-name">capstone-onboarding-v3.zip</td>
+                <td><span class="recent-badge ok">DONE</span></td>
+                <td class="mono">92%</td><td class="mono">3</td>
+                <td><a class="btn btn-link" href="#">Open &rarr;</a></td></tr>
+              <tr><td>2</td><td class="batch-name">compliance-101-build-04.zip</td>
+                <td><span class="recent-badge fail">DONE</span></td>
+                <td class="mono">61%</td><td class="mono">14</td>
+                <td><a class="btn btn-link" href="#">Open &rarr;</a></td></tr>
+              <tr><td>3</td><td class="batch-name">harassment-prevention-2026.zip</td>
+                <td><span class="recent-badge run">RUNNING</span></td>
+                <td class="mono">&mdash;</td><td class="mono">&mdash;</td>
+                <td><a class="btn btn-link" href="#">Open &rarr;</a></td></tr>
+              <tr><td>4</td><td class="batch-name">leadership-essentials-2026.zip</td>
+                <td><span class="recent-badge">PENDING</span></td>
+                <td class="mono">&mdash;</td><td class="mono">&mdash;</td>
+                <td><a class="btn btn-link" href="#">Open &rarr;</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOGIN -->
+    <section class="pv-section">
+      <p class="pv-label">05 &middot; Login</p>
+      <div class="view">
+        <div class="login-card">
+          <h1 class="login-title">Sign in</h1>
+          <p class="muted">Enter your email and we&rsquo;ll send you a one-time sign-in link.</p>
+          <form class="login-form" onsubmit="event.preventDefault()">
+            <label class="login-field"><span>Email</span>
+              <input type="email" placeholder="you@studio.example"></label>
+            <button class="btn btn-primary" type="submit">Send sign-in link</button>
+          </form>
+          <p class="login-status muted">A sign-in link has been sent. Check your inbox.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ERROR -->
+    <section class="pv-section">
+      <p class="pv-label">06 &middot; Error</p>
+      <div class="view">
+        <div class="error-card">
+          <h1>Something went wrong</h1>
+          <p>The package couldn&rsquo;t be unpacked. The <code>.zip</code> may be corrupt or use an unsupported compression method.</p>
+          <button class="btn btn-primary" type="button">Start over</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TYPOGRAPHY + COLOR -->
+    <section class="pv-section">
+      <p class="pv-label">07 &middot; Typography &amp; color</p>
+      <h1 class="serif" style="font-size:3rem;font-weight:400;letter-spacing:-0.015em;line-height:1.1;margin:0 0 1rem">
+        Editorial-precise. Calm, scannable, distinct.
+      </h1>
+      <p style="max-width:65ch;font-size:1.125rem;line-height:1.65;color:var(--ink-2)">
+        Open Pathways is read more than it is clicked. The interface is tuned for an
+        accessibility consultant scrolling through forty-seven violations to write up a
+        remediation report by end of day. Calm light, long reading session, results that
+        feel like findings rather than metrics.
+      </p>
+      <div class="swatches">
+        <div class="swatch" style="background:var(--paper);color:var(--ink)">paper / ink</div>
+        <div class="swatch" style="background:var(--surface);color:var(--ink-2)">surface / ink-2</div>
+        <div class="swatch" style="background:var(--accent);color:var(--accent-fg)">accent / fg</div>
+        <div class="swatch" style="background:var(--accent-soft);color:var(--accent-ink)">accent-soft</div>
+        <div class="swatch" style="background:var(--critical-bg);color:var(--critical)">critical</div>
+        <div class="swatch" style="background:var(--serious-bg);color:var(--serious)">serious</div>
+        <div class="swatch" style="background:var(--moderate-bg);color:var(--moderate)">moderate</div>
+        <div class="swatch" style="background:var(--ok-bg);color:var(--ok)">ok</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="sitefoot" role="contentinfo">
+    <div class="sitefoot-inner">
+      <span class="sitefoot-mark">Open Pathways</span>
+      <ul class="sitefoot-nav">
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="#">Keyboard shortcuts</a></li>
+      </ul>
+    </div>
+  </footer>
+  <script src="/theme.js" defer></script>
+</body>
+</html>

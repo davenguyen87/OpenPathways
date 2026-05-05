@@ -3,48 +3,103 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Open Pathways Web</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Open Pathways — accessibility audits for learning packages</title>
+  <!-- Pre-paint: apply saved theme before first paint to prevent flash.
+       Mirrors theme.js logic; kept tiny and inline because it must run
+       synchronously before the stylesheet renders. -->
+  <script>(function(){try{var t=localStorage.getItem('op-theme');var p=(t==='light'||t==='dark')?t:'auto';var r=(p==='auto')?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;var d=document.documentElement;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);}catch(e){}})();</script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <!-- WCAG 2.4.1 — bypass blocks -->
+  <a class="skip-link" href="#main">Skip to main content</a>
+
   <header class="topbar">
     <div class="brand">
       <a href="/" class="brand-link">Open Pathways</a>
-      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+      <span class="brand-tag">SCORM &middot; AICC &middot; cmi5 &middot; xAPI auditor</span>
     </div>
     <div class="topbar-meta" id="topbar-meta">
       <span id="topbar-user" class="topbar-user hidden"></span>
       <button id="topbar-logout" class="btn btn-link hidden" type="button">Sign out</button>
+      <button class="theme-toggle" id="theme-toggle" type="button"
+              aria-label="Theme: auto, matches your system. Activate to switch to light.">
+        <svg class="theme-icon theme-icon-auto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <main id="view-root">
+  <main id="main" tabindex="-1">
     <!-- ============================================================
          Login (Phase 9B, hosted mode only)
          ============================================================ -->
-    <section class="view view-login hidden" data-view="login">
+    <section class="view view-login hidden" data-view="login" aria-labelledby="login-title">
       <div class="login-card">
-        <h1 class="login-title">Sign in</h1>
-        <p class="muted">Enter your email and we'll send you a sign-in link.</p>
-        <form id="login-form" class="login-form">
+        <h1 class="login-title" id="login-title">Sign in</h1>
+        <p class="muted">Enter your email and we&rsquo;ll send you a one-time sign-in link.</p>
+        <form id="login-form" class="login-form" novalidate>
           <label class="login-field">
             <span>Email</span>
-            <input id="login-email" name="email" type="email" autocomplete="email" required>
+            <input
+              id="login-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              inputmode="email"
+              spellcheck="false"
+              autocapitalize="off"
+              required
+              aria-describedby="login-status"
+            >
           </label>
-          <button class="btn btn-primary" id="login-submit" type="submit">Send sign-in link</button>
+          <button class="btn btn-primary" id="login-submit" type="submit">
+            Send sign-in link
+          </button>
         </form>
-        <p class="login-status muted" id="login-status"></p>
+        <p class="login-status muted" id="login-status" role="status" aria-live="polite"></p>
       </div>
     </section>
 
     <!-- ============================================================
          Idle: drop zone + file picker + try-a-sample
          ============================================================ -->
-    <section class="view view-idle" data-view="idle">
-      <div class="dropzone" id="dropzone" role="region" aria-label="Drop a SCORM or AICC zip here">
+    <section class="view view-idle" data-view="idle" aria-labelledby="idle-title">
+      <div
+        class="dropzone"
+        id="dropzone"
+        role="region"
+        aria-labelledby="idle-title"
+        aria-describedby="idle-sub idle-hint"
+      >
         <div class="dropzone-inner">
-          <h1>Drop a SCORM / AICC <code>.zip</code> here</h1>
-          <p class="muted">Or pick a file from your computer to start the audit.</p>
+          <h1 id="idle-title">
+            Drop a learning package &mdash; or pick one to audit.
+          </h1>
+          <p id="idle-sub">
+            Open Pathways audits SCORM, AICC, cmi5, and xAPI <code>.zip</code> files
+            against WCAG&nbsp;2.2 AA. You&rsquo;ll get a scorecard, violations grouped
+            by criterion, and a Markdown / JSON / CSV report.
+          </p>
           <div class="dropzone-actions">
             <label class="btn btn-primary" for="file-input">
               Select a file
@@ -60,8 +115,9 @@
               Try a sample
             </button>
           </div>
-          <p class="dropzone-hint muted">
-            Audits run locally. Nothing is uploaded off your machine.
+          <p class="dropzone-hint" id="idle-hint">
+            Files stay on this instance. Audit history retained per the operator&rsquo;s
+            retention window (<a href="/privacy">privacy</a>).
           </p>
         </div>
       </div>
@@ -89,16 +145,18 @@
           </label>
         </div>
         <p class="muted options-hint">
-          Saved in your browser. Dynamic checks always use headless Chromium
-          (Firefox/WebKit don't expose the accessibility tree via CDP).
+          Saved in your browser. Dynamic checks always use headless Chromium &mdash;
+          Firefox and WebKit don&rsquo;t expose the accessibility tree via CDP.
         </p>
       </details>
 
-      <section class="recent-panel hidden" id="recent-panel" aria-label="Recent audits">
-        <h2 class="recent-title">Recent audits</h2>
+      <section class="recent-panel hidden" id="recent-panel" aria-labelledby="recent-title">
+        <h2 class="recent-title" id="recent-title">Recent audits</h2>
         <ul class="recent-list" id="recent-list"></ul>
         <p class="muted recent-hint">
-          Stored locally and persisted across restarts. Use OPEN_PATHWAYS_RETENTION_DAYS to set a retention window (default: keep forever).
+          Stored on this instance and persisted across restarts. Set
+          <code>OPEN_PATHWAYS_RETENTION_DAYS</code> to control retention
+          (default: keep forever in local mode).
         </p>
       </section>
     </section>
@@ -106,26 +164,35 @@
     <!-- ============================================================
          Running: progress log + cancel
          ============================================================ -->
-    <section class="view view-running hidden" data-view="running">
+    <section class="view view-running hidden" data-view="running" aria-labelledby="running-title">
       <div class="run-header">
         <div>
-          <h1 id="running-title">Auditing…</h1>
+          <h1 id="running-title">Auditing&hellip;</h1>
           <p class="muted" id="running-subtitle">Preparing</p>
         </div>
         <button class="btn btn-secondary" id="cancel-btn" type="button">Cancel</button>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-      <ol class="progress-log" id="progress-log" aria-live="polite"></ol>
+      <div
+        class="progress-bar"
+        role="progressbar"
+        aria-labelledby="running-title"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        id="progress-bar"
+      >
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <ol class="progress-log" id="progress-log" aria-live="polite" aria-relevant="additions"></ol>
     </section>
 
     <!-- ============================================================
          Batch (Phase 8): live-updating table of jobs in a batch
          ============================================================ -->
-    <section class="view view-batch hidden" data-view="batch">
+    <section class="view view-batch hidden" data-view="batch" aria-labelledby="batch-title">
       <div class="run-header">
         <div>
           <h1 id="batch-title">Batch audit</h1>
-          <p class="muted" id="batch-subtitle">Loading…</p>
+          <p class="muted" id="batch-subtitle">Loading&hellip;</p>
         </div>
         <div>
           <button class="btn btn-secondary" id="batch-csv">Download CSV</button>
@@ -133,15 +200,16 @@
         </div>
       </div>
       <div class="batch-table-wrap">
-        <table class="batch-table" id="batch-table" aria-label="Jobs in this batch">
+        <table class="batch-table" id="batch-table">
+          <caption class="visually-hidden">Jobs in this batch, with status, score, and violation counts.</caption>
           <thead>
             <tr>
-              <th>#</th>
-              <th>Package</th>
-              <th>Status</th>
-              <th>Score</th>
-              <th>Violations</th>
-              <th></th>
+              <th scope="col">#</th>
+              <th scope="col">Package</th>
+              <th scope="col">Status</th>
+              <th scope="col">Score</th>
+              <th scope="col">Violations</th>
+              <th scope="col"><span class="visually-hidden">Open</span></th>
             </tr>
           </thead>
           <tbody id="batch-tbody"></tbody>
@@ -152,8 +220,10 @@
     <!-- ============================================================
          Done: scorecard + filters + violations
          ============================================================ -->
-    <section class="view view-done hidden" data-view="done">
-      <div class="scorecard" id="scorecard"></div>
+    <section class="view view-done hidden" data-view="done" aria-labelledby="done-title">
+      <h1 id="done-title" class="visually-hidden">Audit results</h1>
+
+      <div class="scorecard" id="scorecard" aria-label="Audit summary"></div>
 
       <div class="results-actions">
         <button class="btn btn-secondary" id="preview-fixes">Preview fixes</button>
@@ -167,21 +237,21 @@
       <div class="baseline-controls" id="baseline-controls">
         <label for="baseline-select" class="muted">Compare against</label>
         <select id="baseline-select">
-          <option value="">— none —</option>
+          <option value="">&mdash; none &mdash;</option>
         </select>
       </div>
 
       <!-- Banner shown when a baseline filter is in effect. -->
       <div class="baseline-banner hidden" id="baseline-banner" role="status"></div>
 
-      <div class="filters" id="filters"></div>
+      <div class="filters" id="filters" role="search" aria-label="Filter violations"></div>
       <div class="results" id="results"></div>
     </section>
 
     <!-- ============================================================
          Error / not-found
          ============================================================ -->
-    <section class="view view-error hidden" data-view="error">
+    <section class="view view-error hidden" data-view="error" aria-labelledby="error-title">
       <div class="error-card">
         <h1 id="error-title">Something went wrong</h1>
         <p id="error-body" class="muted"></p>
@@ -190,10 +260,23 @@
     </section>
   </main>
 
+  <!-- Footer with consistent help link (WCAG 3.2.6) -->
+  <footer class="sitefoot" role="contentinfo">
+    <div class="sitefoot-inner">
+      <span class="sitefoot-mark">Open Pathways</span>
+      <ul class="sitefoot-nav">
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="#" id="footer-help">Keyboard shortcuts</a></li>
+      </ul>
+    </div>
+  </footer>
+
   <!-- Full-page overlay shown while a file is being dragged into the window -->
   <div class="drag-overlay" id="drag-overlay" aria-hidden="true">
     <div class="drag-overlay-inner">
-      <div class="drag-overlay-icon">⬇</div>
+      <div class="drag-overlay-icon" aria-hidden="true">&darr;</div>
       <div>Drop to start the audit</div>
     </div>
   </div>
@@ -204,13 +287,13 @@
     <div class="modal-card help-card">
       <header class="modal-head">
         <h2 id="help-title">Keyboard shortcuts</h2>
-        <button class="btn btn-link" id="help-close" type="button" aria-label="Close">✕</button>
+        <button class="btn btn-link" id="help-close" type="button" aria-label="Close keyboard shortcuts">&times;</button>
       </header>
       <div class="modal-body">
         <dl class="kbd-list">
-          <dt><kbd>/</kbd></dt>            <dd>Focus the search field (done view)</dd>
-          <dt><kbd>j</kbd> · <kbd>k</kbd></dt> <dd>Next / previous violation</dd>
-          <dt><kbd>1</kbd>–<kbd>4</kbd></dt> <dd>Filter by severity (1=critical, 2=serious, 3=moderate, 4=minor)</dd>
+          <dt><kbd>/</kbd></dt>            <dd>Focus the search field (results view)</dd>
+          <dt><kbd>j</kbd> &middot; <kbd>k</kbd></dt> <dd>Next / previous violation</dd>
+          <dt><kbd>1</kbd>&ndash;<kbd>4</kbd></dt> <dd>Filter by severity (1 critical &rarr; 4 minor)</dd>
           <dt><kbd>0</kbd></dt>             <dd>Clear the severity filter</dd>
           <dt><kbd>Esc</kbd></dt>           <dd>Close overlay / clear filters</dd>
           <dt><kbd>?</kbd></dt>             <dd>Toggle this help</dd>
@@ -227,10 +310,10 @@
     <div class="modal-card">
       <header class="modal-head">
         <h2 id="fix-modal-title">Preview fixes</h2>
-        <button class="btn btn-link" id="fix-modal-close" type="button" aria-label="Close">✕</button>
+        <button class="btn btn-link" id="fix-modal-close" type="button" aria-label="Close preview fixes">&times;</button>
       </header>
       <div class="modal-body" id="fix-modal-body">
-        <p class="muted">Loading…</p>
+        <p class="muted">Loading&hellip;</p>
       </div>
       <footer class="modal-foot">
         <button class="btn btn-link" id="fix-modal-cancel" type="button">Cancel</button>
@@ -239,6 +322,7 @@
     </div>
   </div>
 
+  <script src="/theme.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

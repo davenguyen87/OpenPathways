@@ -3,31 +3,60 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Privacy — Open Pathways</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Privacy &mdash; Open Pathways</title>
+  <script>(function(){try{var t=localStorage.getItem('op-theme');var p=(t==='light'||t==='dark')?t:'auto';var r=(p==='auto')?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;var d=document.documentElement;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);}catch(e){}})();</script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
   <header class="topbar">
     <div class="brand">
       <a href="/" class="brand-link">Open Pathways</a>
-      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+      <span class="brand-tag">SCORM &middot; AICC &middot; cmi5 &middot; xAPI auditor</span>
+    </div>
+    <div class="topbar-meta">
+      <button class="theme-toggle" id="theme-toggle" type="button"
+              aria-label="Theme: auto, matches your system. Activate to switch to light.">
+        <svg class="theme-icon theme-icon-auto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <main class="static-page">
+  <main id="main" class="static-page" tabindex="-1">
     <h1>Privacy</h1>
 
-    <p class="muted">Last updated: 2026-05-02</p>
+    <p class="muted">Last updated 2026&ndash;05&ndash;02.</p>
 
     <h2>What we store</h2>
     <p>
-      When you upload a package, the following is stored on the server you're
+      When you upload a package, the following is stored on the server you&rsquo;re
       currently signed in to:
     </p>
     <ul>
       <li>The original <code>.zip</code> file you uploaded.</li>
       <li>
-        A row in the database recording the job — your email address (the one
+        A row in the database recording the job: your email address (the one
         you used to sign in), the original filename, the time of upload, the
         WCAG standard you selected, and the resulting scorecard / violations.
       </li>
@@ -38,26 +67,26 @@
       </li>
     </ul>
 
-    <h2>What we don't store</h2>
+    <h2>What we don&rsquo;t store</h2>
     <p>
       We do not run third-party analytics or send your data to advertising
       networks. We do not analyze the contents of your packages for any
       purpose other than running the audit you requested.
     </p>
 
-    <h2>How long it's kept</h2>
+    <h2>How long it&rsquo;s kept</h2>
     <p>
       Uploads and audit history are retained for the period configured by this
-      instance's operator (default: 30 days). Older entries are automatically
+      instance&rsquo;s operator (default: 30 days). Older entries are automatically
       deleted, including the underlying object in storage. If the bucket
       approaches its capacity, oldest terminal jobs are evicted earlier.
     </p>
 
     <h2>Who can see your data</h2>
     <p>
-      Only you. The application enforces per-user isolation: your jobs aren't
-      visible in any other signed-in user's list, and direct attempts to fetch
-      another user's job by id return 404. The instance operator has database
+      Only you. The application enforces per-user isolation: your jobs aren&rsquo;t
+      visible in any other signed-in user&rsquo;s list, and direct attempts to fetch
+      another user&rsquo;s job by id return 404. The instance operator has database
       access for backups and incident response.
     </p>
 
@@ -65,7 +94,7 @@
     <p>
       You can sign out at any time from the top right. To request deletion of
       your account and all associated jobs, email the operator of this instance.
-      We'll confirm by replying to the email you signed up with, then remove
+      We&rsquo;ll confirm by replying to the email you signed up with, then remove
       the rows and underlying objects within 30 days.
     </p>
 
@@ -78,9 +107,24 @@
       bounded.
     </p>
 
-    <p class="muted static-page-foot">
-      <a href="/about">About</a> · <a href="/terms">Terms</a>
+    <p class="static-page-foot">
+      <a href="/about">About</a>
+      <span aria-hidden="true">&middot;</span>
+      <a href="/terms">Terms</a>
     </p>
   </main>
+
+  <footer class="sitefoot" role="contentinfo">
+    <div class="sitefoot-inner">
+      <span class="sitefoot-mark">Open Pathways</span>
+      <ul class="sitefoot-nav">
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/">Get started</a></li>
+      </ul>
+    </div>
+  </footer>
+  <script src="/theme.js" defer></script>
 </body>
 </html>

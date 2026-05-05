@@ -3,21 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Terms — Open Pathways</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Terms &mdash; Open Pathways</title>
+  <script>(function(){try{var t=localStorage.getItem('op-theme');var p=(t==='light'||t==='dark')?t:'auto';var r=(p==='auto')?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;var d=document.documentElement;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);}catch(e){}})();</script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
   <header class="topbar">
     <div class="brand">
       <a href="/" class="brand-link">Open Pathways</a>
-      <span class="brand-tag">SCORM/AICC accessibility auditor</span>
+      <span class="brand-tag">SCORM &middot; AICC &middot; cmi5 &middot; xAPI auditor</span>
+    </div>
+    <div class="topbar-meta">
+      <button class="theme-toggle" id="theme-toggle" type="button"
+              aria-label="Theme: auto, matches your system. Activate to switch to light.">
+        <svg class="theme-icon theme-icon-auto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <main class="static-page">
+  <main id="main" class="static-page" tabindex="-1">
     <h1>Terms</h1>
 
-    <p class="muted">Last updated: 2026-05-02</p>
+    <p class="muted">Last updated 2026&ndash;05&ndash;02.</p>
 
     <h2>What this is</h2>
     <p>
@@ -29,9 +58,9 @@
 
     <h2>Acceptable use</h2>
     <p>
-      Use Open Pathways only for content you have a right to audit. Don't
+      Use Open Pathways only for content you have a right to audit. Don&rsquo;t
       upload material that infringes copyright, contains malware, or violates
-      applicable law. Don't try to break the service or use it to attack
+      applicable law. Don&rsquo;t try to break the service or use it to attack
       others.
     </p>
 
@@ -44,21 +73,36 @@
 
     <h2>No warranty</h2>
     <p>
-      The service is provided "as is," without warranty. The operator may
+      The service is provided &ldquo;as is,&rdquo; without warranty. The operator may
       take it offline for maintenance, change behavior between versions, or
-      discontinue it entirely. You're responsible for keeping your own copies
+      discontinue it entirely. You&rsquo;re responsible for keeping your own copies
       of any reports you need.
     </p>
 
     <h2>Liability</h2>
     <p>
-      To the extent permitted by law, the operator isn't liable for indirect,
+      To the extent permitted by law, the operator isn&rsquo;t liable for indirect,
       incidental, or consequential damages arising from use of the service.
     </p>
 
-    <p class="muted static-page-foot">
-      <a href="/about">About</a> · <a href="/privacy">Privacy</a>
+    <p class="static-page-foot">
+      <a href="/about">About</a>
+      <span aria-hidden="true">&middot;</span>
+      <a href="/privacy">Privacy</a>
     </p>
   </main>
+
+  <footer class="sitefoot" role="contentinfo">
+    <div class="sitefoot-inner">
+      <span class="sitefoot-mark">Open Pathways</span>
+      <ul class="sitefoot-nav">
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/">Get started</a></li>
+      </ul>
+    </div>
+  </footer>
+  <script src="/theme.js" defer></script>
 </body>
 </html>

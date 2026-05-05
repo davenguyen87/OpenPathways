@@ -43,7 +43,9 @@
   const toast = (msg) => {
     let node = document.querySelector('.toast');
     if (!node) {
-      node = el('div', { class: 'toast' });
+      // role=status + aria-live=polite makes the message announced
+      // by screen readers without stealing focus (WCAG 4.1.3).
+      node = el('div', { class: 'toast', role: 'status', 'aria-live': 'polite' });
       document.body.appendChild(node);
     }
     node.textContent = msg;
@@ -321,6 +323,8 @@
     $('#running-title').textContent = `Auditing ${label}`;
     $('#running-subtitle').textContent = 'Preparing…';
     $('#progress-fill').style.width = '0%';
+    const bar = document.getElementById('progress-bar');
+    if (bar) bar.setAttribute('aria-valuenow', '0');
     $('#progress-log').innerHTML = '';
   }
 
@@ -341,6 +345,8 @@
     const done = state.progressDone.static + state.progressDone.dynamic;
     const pct = total > 0 ? Math.min(99, Math.round((done / total) * 100)) : 5;
     $('#progress-fill').style.width = pct + '%';
+    const bar = document.getElementById('progress-bar');
+    if (bar) bar.setAttribute('aria-valuenow', String(pct));
   }
 
   function handleProgress(ev) {
@@ -398,6 +404,8 @@
     es.addEventListener('done', () => {
       es.close();
       $('#progress-fill').style.width = '100%';
+      const bar = document.getElementById('progress-bar');
+      if (bar) bar.setAttribute('aria-valuenow', '100');
       // New audits start unfiltered; the user can opt into a baseline diff.
       loadResult(jobId, null);
     });
@@ -1420,6 +1428,12 @@ async function loadCurrentUser() {
     if (helpClose) helpClose.addEventListener('click', closeHelp);
     const helpBackdrop = document.getElementById('help-backdrop');
     if (helpBackdrop) helpBackdrop.addEventListener('click', closeHelp);
+    // Footer "Keyboard shortcuts" link — same overlay, accessible from every page.
+    const footerHelp = document.getElementById('footer-help');
+    if (footerHelp) footerHelp.addEventListener('click', (e) => {
+      e.preventDefault();
+      showHelp();
+    });
 
     // Phase 8: keyboard shortcuts.
     document.addEventListener('keydown', handleShortcut);
