@@ -481,6 +481,21 @@
     if (nameCell && nameCell.textContent !== filename) {
       nameCell.textContent = filename;
     }
+    // Populate the "Open →" link cell now that we have a real jobId. Matches
+    // the existing batchRow() pattern: a normal href for accessibility +
+    // copy-link, with a click handler that does SPA-style navigation.
+    const linkCell = rowEl.children[5];
+    if (linkCell && !linkCell.hasChildNodes()) {
+      const link = el('a', {
+        class: 'btn btn-link', href: `/job/${jobId}`, text: 'Open →',
+      });
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        history.pushState({ jobId }, '', `/job/${jobId}`);
+        bootstrapFromUrl();
+      });
+      linkCell.appendChild(link);
+    }
   }
 
   function updateBatchRowForError(rowEl, errorMsg) {
@@ -1397,6 +1412,25 @@
     if (mdEl) mdEl.href = `/api/batches/${batchId}/rollup.md`;
     if (jsonEl) jsonEl.href = `/api/batches/${batchId}/rollup.json`;
     if (rollupSection) rollupSection.classList.remove('hidden');
+
+    // Replace the misleading "uploaded — auditing…" subtitle. Count the
+    // jobs in the table so the message reflects what actually finished.
+    const subtitle = $('#batch-subtitle');
+    if (subtitle) {
+      const tbody = $('#batch-tbody');
+      const rows = tbody ? tbody.querySelectorAll('tr') : [];
+      const total = rows.length;
+      let done = 0, errored = 0;
+      rows.forEach((r) => {
+        const pill = r.querySelector('.recent-badge');
+        const status = pill ? pill.textContent.trim() : '';
+        if (status === 'done') done++;
+        else if (status === 'error' || status === 'cancelled') errored++;
+      });
+      const noun = total === 1 ? 'audit' : 'audits';
+      const errPart = errored > 0 ? ` · ${errored} failed` : '';
+      subtitle.textContent = `${done} of ${total} ${noun} complete${errPart} — library rollup ready.`;
+    }
   }
 
   // -------------------------------------------------------------- auth helpers (Phase 9B)
