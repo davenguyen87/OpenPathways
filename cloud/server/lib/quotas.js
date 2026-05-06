@@ -2,20 +2,29 @@
  * Per-user upload quotas (Phase 9C).
  *
  * Three independent limits, each readable from env at boot:
- *   QUOTA_CONCURRENT_JOBS    (default 2)
- *   QUOTA_UPLOADS_PER_DAY    (default 50)
+ *   QUOTA_CONCURRENT_JOBS    (default 100)
+ *   QUOTA_UPLOADS_PER_DAY    (default 500)
  *   QUOTA_STORED_BYTES       (default 5 GiB = 5368709120)
  *
- * Hosted mode applies them on POST /api/audits and POST /api/audits/batch.
- * Local mode bypasses (single-tenant; nothing to bound).
+ * Hosted mode applies them on POST /api/audits, POST /api/batches, and
+ * POST /api/batches/:id/files. Local mode bypasses (single-tenant; nothing
+ * to bound).
  *
  * The 429 response body includes a stable `reason` string ('concurrent' /
  * 'daily' / 'storage') so the SPA can show a useful message and the smoke
  * test can assert the right limit fired.
+ *
+ * Note on the 'concurrent' semantic: it counts jobs in pending or running
+ * state, not just running. A batch of 50 files registers 50 'concurrent'
+ * jobs even though WORKER_CONCURRENCY (default 1) means only one runs at a
+ * time. Defaults below give 2× MAX_BATCH_COUNT (50) and 10× headroom on
+ * daily uploads so a single batch doesn't immediately trip the limit.
+ * Operators with multi-batch workloads should raise QUOTA_CONCURRENT_JOBS
+ * accordingly via Coolify env (or whatever orchestration is in use).
  */
 
-const DEFAULT_CONCURRENT = 2;
-const DEFAULT_UPLOADS_PER_DAY = 50;
+const DEFAULT_CONCURRENT = 100;
+const DEFAULT_UPLOADS_PER_DAY = 500;
 const DEFAULT_STORED_BYTES = 5 * 1024 * 1024 * 1024; // 5 GiB
 
 function readQuotaConfig() {
