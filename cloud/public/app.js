@@ -1759,6 +1759,29 @@ async function loadCurrentUser() {
       if (list && list.length > 0) startAuditFromFiles(Array.from(list));
       e.target.value = ''; // allow re-selecting the same file
     });
+    // Folder picker (webkitdirectory). Browser hands us every file in the
+    // folder + subfolders; filter to .zip at the top level only (one level
+    // deep) to match the audit-library CLI semantics, then route through
+    // the same intake function so single vs batch behavior is identical.
+    const folderInput = $('#folder-input');
+    if (folderInput) {
+      folderInput.addEventListener('change', (e) => {
+        const all = Array.from(e.target.files || []);
+        const zips = all.filter((f) => {
+          if (!/\.zip$/i.test(f.name)) return false;
+          const rel = f.webkitRelativePath || '';
+          // depth 1 = exactly one slash: "<folder>/<file>.zip"
+          const slashes = (rel.match(/\//g) || []).length;
+          return slashes === 1;
+        });
+        if (zips.length === 0) {
+          showError('No .zip packages found at the top level of that folder.');
+        } else {
+          startAuditFromFiles(zips);
+        }
+        e.target.value = ''; // allow re-selecting the same folder
+      });
+    }
     $('#sample-btn').addEventListener('click', () => startAuditFromSample());
     $('#cancel-btn').addEventListener('click', cancelCurrent);
     $('#new-audit').addEventListener('click', () => {

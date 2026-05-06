@@ -93,20 +93,32 @@
       >
         <div class="dropzone-inner">
           <h1 id="idle-title">
-            Drop a learning package &mdash; or pick one to audit.
+            Drop one or more learning packages &mdash; or pick a folder to audit.
           </h1>
           <p id="idle-sub">
             Prism audits SCORM, AICC, cmi5, and xAPI <code>.zip</code> files
-            against WCAG&nbsp;2.2 AA. You&rsquo;ll get a scorecard, violations grouped
-            by criterion, and a Markdown / JSON / CSV report.
+            against WCAG&nbsp;2.2 AA. Drop or select multiple packages at once,
+            or point at a folder containing zips &mdash; you&rsquo;ll get a per-package
+            report plus a cross-package library rollup.
           </p>
           <div class="dropzone-actions">
             <label class="btn btn-primary" for="file-input">
-              Select a file
+              Select files
               <input
                 type="file"
                 id="file-input"
                 accept=".zip,application/zip,application/x-zip-compressed"
+                multiple
+                hidden
+              >
+            </label>
+            <label class="btn btn-secondary" for="folder-input">
+              Select folder
+              <input
+                type="file"
+                id="folder-input"
+                webkitdirectory
+                directory
                 multiple
                 hidden
               >
