@@ -512,128 +512,11 @@
     const card = $('#scorecard');
     card.innerHTML = '';
     card.appendChild(el('div', { class: `score-circle ${passClass}`, text: score }));
-    const meta = [
+    card.appendChild(el('div', { class: 'scorecard-meta' }, [
       el('div', { class: 'scorecard-headline', text: headline }),
       el('div', { class: 'muted', text: `Audited ${new Date(r.scannedAt).toLocaleString()}` }),
       el('div', { class: 'scorecard-tags' }, tags),
-    ];
-
-    // v3: Add scope estimate if present
-    if (r.scopeEstimate && r.scopeEstimate.totalHours != null) {
-      const hours = Math.round(r.scopeEstimate.totalHours * 10) / 10;
-      meta.push(el('div', { class: 'scope-estimate', text: `Estimated remediation effort: ${hours} hrs` }));
-    }
-
-    // v3: Add triage rollup if present
-    if (r.triage && r.triage.rollup) {
-      meta.push(renderTriageRollup(r.triage.rollup));
-    }
-
-    card.appendChild(el('div', { class: 'scorecard-meta' }, meta));
-
-    // v3: Render top-3-risks card after scorecard
-    if (r.topRisks && (r.topRisks.risks || r.topRisks).length > 0) {
-      renderTopRisksCard(r.topRisks);
-    }
-
-    // v3: Render section 508 table at the end (will be positioned after violations)
-    if (r.section508Table && r.section508Table.length > 0) {
-      renderSection508Table(r.section508Table);
-    }
-  }
-
-  function renderTriageRollup(rollup) {
-    const { dominantTag, byTriage } = rollup;
-    if (!byTriage) return null;
-
-    const total = Object.values(byTriage).reduce((a, b) => a + b, 0);
-    if (total === 0) return null;
-
-    const tiers = ['auto-fix-safe', 'auto-fix-assisted', 'author-rework', 'content-rework', 'recommend-retire'];
-    const colors = { 'auto-fix-safe': '--ok', 'auto-fix-assisted': '--ok', 'author-rework': '--moderate', 'content-rework': '--serious', 'recommend-retire': '--critical' };
-
-    const segments = [];
-    for (const tier of tiers) {
-      const count = byTriage[tier] || 0;
-      if (count > 0) {
-        const pct = (count / total) * 100;
-        const colorVar = colors[tier] || '--moderate';
-        segments.push(el('div', { class: 'triage-segment', style: `flex: ${pct}%; background-color: var(${colorVar});`, title: `${tier}: ${count}` }));
-      }
-    }
-
-    if (segments.length === 0) return null;
-
-    return el('div', { class: 'triage-rollup' }, [
-      el('div', { class: 'triage-label', text: 'Triage distribution:' }),
-      el('div', { class: 'triage-bar' }, segments),
-    ]);
-  }
-
-  function renderTopRisksCard(topRisksData) {
-    const risks = topRisksData.risks || (Array.isArray(topRisksData) ? topRisksData : []);
-    if (risks.length === 0) return;
-
-    const scorecard = $('#scorecard');
-    const card = el('div', { class: 'v3-card top-risks-card' });
-
-    const title = el('h2', { class: 'v3-card-title', text: 'Top 3 Risks' });
-    card.appendChild(title);
-
-    if (topRisksData.fallback === true && topRisksData.fallbackMessage) {
-      const note = el('p', { class: 'v3-fallback-note', text: topRisksData.fallbackMessage });
-      card.appendChild(note);
-    }
-
-    const riskList = el('ul', { class: 'top-risks-list' });
-    risks.slice(0, 3).forEach((risk, idx) => {
-      const item = el('li', { class: 'risk-item' }, [
-        el('span', { class: 'risk-rank', text: `${idx + 1}` }),
-        el('span', { class: 'risk-criterion', text: risk.criterion || '?' }),
-        el('span', { class: 'risk-name', text: risk.criterionName || 'Unknown' }),
-        el('span', { class: `risk-severity sev-${risk.severity || 'minor'}`, text: (risk.severity || '').toUpperCase() }),
-        el('span', { class: 'risk-count', text: `${risk.packageCount || 0} pkg${risk.packageCount === 1 ? '' : 's'}` }),
-      ]);
-      riskList.appendChild(item);
-    });
-    card.appendChild(riskList);
-
-    scorecard.appendChild(card);
-  }
-
-  function renderSection508Table(section508Data) {
-    if (!section508Data || section508Data.length === 0) return;
-
-    const results = $('#results');
-    if (!results) return;
-
-    const container = el('div', { class: 'v3-section508-container' });
-    container.appendChild(el('h2', { class: 'v3-section-title', text: 'Section 508 Mapping' }));
-
-    const table = el('table', { class: 'section508-table' });
-    const thead = el('thead');
-    const headerRow = el('tr');
-    headerRow.appendChild(el('th', { scope: 'col', text: '508 Reference' }));
-    headerRow.appendChild(el('th', { scope: 'col', text: 'Title' }));
-    headerRow.appendChild(el('th', { scope: 'col', text: 'Findings' }));
-    headerRow.appendChild(el('th', { scope: 'col', text: 'Mapped WCAG Criteria' }));
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    const tbody = el('tbody');
-    for (const row of section508Data) {
-      const tr = el('tr');
-      tr.appendChild(el('td', { text: row.reference || '—' }));
-      tr.appendChild(el('td', { text: row.refTitle || '—' }));
-      tr.appendChild(el('td', { text: String(row.findingCount || 0) }));
-      const criteriaText = (row.criterionIds && Array.isArray(row.criterionIds)) ? row.criterionIds.join(', ') : '—';
-      tr.appendChild(el('td', { text: criteriaText }));
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-
-    container.appendChild(table);
-    results.appendChild(container);
+    ]));
   }
 
   function renderFilters(r) {
@@ -1524,10 +1407,6 @@ async function loadCurrentUser() {
     const downloadCsv = document.getElementById('download-csv');
     if (downloadCsv) downloadCsv.addEventListener('click', () => {
       if (state.jobId) window.location.href = `/api/audits/${state.jobId}/report.csv`;
-    });
-    const downloadHtml = document.getElementById('download-html');
-    if (downloadHtml) downloadHtml.addEventListener('click', () => {
-      if (state.jobId) window.location.href = `/api/audits/${state.jobId}/report.html`;
     });
 
     // Batch view buttons.
