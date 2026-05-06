@@ -1,6 +1,6 @@
 # Package Parser
 
-Detects and parses SCORM 1.2, SCORM 2004, AICC, and xAPI packages. Returns package type, HTML entry points, and the parsed manifest structure.
+Detects and parses SCORM 1.2, SCORM 2004, AICC, cmi5, and xAPI packages. Returns package type, HTML entry points, and the parsed manifest structure.
 
 ## Detection Order
 
@@ -8,8 +8,9 @@ Detects and parses SCORM 1.2, SCORM 2004, AICC, and xAPI packages. Returns packa
    - **SCORM 1.2**: `imsmanifest.xml` without `schemaversion` attribute or with schemaversion < 2004.
    - **SCORM 2004**: `imsmanifest.xml` with `schemaversion` containing "2004" OR namespaces indicating SCORM 2004 (`imscp_v1p1` + `adlcp_v1p3`/`imsss`).
 2. **AICC**: If any `*.crs` file is present at any depth.
-3. **xAPI**: If `tincan.xml` is present at the package root.
-4. **Error**: If none are found, throw `"Could not detect a valid SCORM, AICC, or xAPI manifest."`
+3. **cmi5**: If `cmi5.xml` is present at the package root.
+4. **xAPI**: If `tincan.xml` is present at the package root.
+5. **Error**: If none are found, throw `"Could not detect a valid SCORM, AICC, xAPI, or cmi5 manifest."`
 
 ## SCORM Parsing
 
@@ -109,6 +110,23 @@ Detects and parses SCORM 1.2, SCORM 2004, AICC, and xAPI packages. Returns packa
 - If no activities have a `<launch>` element → return `{ errors: ["xAPI package has no launchable activities"] }`
 - Malformed XML → propagated from `xml2js` parser
 
+## cmi5 Parsing
+
+### File Format Support
+- `cmi5.xml`: cmi5 course structure XML at the package root
+  - Root element: `<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1.0/CourseStructure.xsd">`
+  - Contains nested `<au>` (Assignable Unit) elements with `<url>` children
+  - Each AU has an `id` attribute and `<url>` element pointing at the launchable content
+
+### Entry Points
+- Array of relative paths from `<url>` elements inside `<au>` blocks
+- Absolute URLs (http://, https://) are skipped (external resources)
+- Normalized to forward slashes
+- Deduplicated
+
+### Modules
+The cmi5 parser shares the same general output shape as xAPI: one entry per launchable AU. See `src/parser/cmi5.js` for the detailed shape.
+
 ## Edge Cases Handled
 
 - **BOM stripping**: UTF-8 BOM is stripped from XML and INI files before parsing
@@ -120,7 +138,7 @@ Detects and parses SCORM 1.2, SCORM 2004, AICC, and xAPI packages. Returns packa
 
 ## Error Cases
 
-- No manifest detected → `"Could not detect a valid SCORM or AICC manifest."`
+- No manifest detected → `"Could not detect a valid SCORM, AICC, xAPI, or cmi5 manifest."`
 - AICC profile 3/4 → `"AICC profile 3/4 is not supported. Only profiles 1 and 2 are supported."`
 - Malformed XML → propagated from `xml2js` parser
 - Malformed INI/CSV → best-effort parsing (skips malformed rows)
@@ -131,5 +149,6 @@ Detects and parses SCORM 1.2, SCORM 2004, AICC, and xAPI packages. Returns packa
 - `detect.js` — Package type detection logic
 - `scorm.js` — SCORM 1.2 + 2004 parser (uses xml2js)
 - `aicc.js` — AICC parser (INI and CSV parsing)
+- `cmi5.js` — cmi5 course-structure parser (uses xml2js)
 - `xapi.js` — xAPI / Tin Can parser (uses xml2js)
 - `util.js` — Shared utilities: file search, text reading, CSV/INI parsing

@@ -24,7 +24,8 @@ src/
 ├── checks/             ← one file per WCAG criterion (e.g. 1-1-1-non-text-content.js)
 ├── dynamic-checks/     ← Playwright-based checks against the live AX tree
 ├── fixers/             ← --fix mode mechanical repairs (alt="", lang, title, etc.)
-├── reporter/           ← html.js (primary), markdown-v3.js, markdown.js (legacy), json.js, sarif.js, text.js
+├── reporter/           ← index.js orchestrates writeReports(); renderers: html.js (primary),
+│                          markdown-v3.js, markdown.js (legacy), json.js, sarif.js, text.js
 └── lib/                ← audit-library, triage, scope-estimator, section508,
                           top-risks, library-rollup, ax-tree-adapter, baseline,
                           ensure-playwright, llm-provenance, etc.

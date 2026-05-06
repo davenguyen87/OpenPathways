@@ -4,6 +4,11 @@ WCAG 2.1 AA + Section 508 accessibility audits for SCORM 1.2, SCORM 2004, AICC, 
 
 v3 transforms Open Pathways from a JSON-generating audit tool into a senior-consultant delivery platform for accessibility assessments scoped for Cornerstone OnDemand consulting engagements.
 
+This README covers the **CLI** (the primary surface). Two adjacent surfaces share the same audit core under `src/`:
+
+- **Local web UI** (`web/`) — drop a `.zip` in a browser. `npm run serve`. See [`web/README.md`](web/README.md).
+- **Hosted multi-tenant service** (`cloud/`) — magic-link auth, S3 storage, Coolify deploy. See [`cloud/README.md`](cloud/README.md) and [`cloud/DEPLOY.md`](cloud/DEPLOY.md).
+
 ---
 
 ## Quick start
@@ -91,20 +96,21 @@ The rollup report includes:
 
 | Flag | Meaning | Default | Notes |
 |------|---------|---------|-------|
-| `--engagement <id>` | Engagement ID (required for v3 deliverables) | — | e.g., `SL-2026-0418`. All output isolated under `./engagements/<id>/`. |
+| `--engagement <id>` | Engagement ID (required for v3 deliverables; required for `audit-library`) | — | e.g., `SL-2026-0418`. All output isolated under `./engagements/<id>/`. |
 | `--engagement-redact` | Replace client name with engagement ID in report | — | For confidential drafts circulating internally. |
-| `--brand-config <path>` | Path to custom brand config | `config/brand.json` | Override fonts, colors, logo for white-label or co-branded deliverables. |
+| `--brand-config <path>` | Path to custom brand config | `config/brand.json` | Override colors and brand marks for white-label or co-branded deliverables. |
 | `--standard <standard>` | WCAG version: `wcag21` or `wcag22` | `wcag21` | Default flipped from v2 to 2.1. Use `wcag22` for forward-looking audits. |
+| `--baseline <path>` | Path to prior `results.json` | — | Suppress violations already present in the baseline (single-package `audit` only). |
 | `--llm-provider <provider>` | LLM provider for assisted findings | — | Off by default. Both `--llm-provider` and `--llm-key-from-env` required to enable. |
 | `--llm-key-from-env <env-var>` | Environment variable holding LLM API key | — | Off by default. No assisted findings without both flags set. |
 | `--browser <browser>` | Browser for dynamic checks | `chromium` | `chromium`, `firefox`, or `webkit`. |
-| `--fix` | Apply mechanical fixes; write corrected package | — | Writes `<package>.scorm-fixed.zip`. |
-| `--fix-dry-run` | Preview fixes without writing | — | |
+| `--fix` | Apply mechanical fixes; write corrected package | — | Writes `<package>.scorm-fixed.zip`. Single-package `audit` only. |
+| `--fix-dry-run` | Preview fixes without writing | — | Single-package `audit` only. |
 | `--format <format>` | Report format (legacy v2 flag) | `md` | `md` or `txt`. Ignored in v3 (HTML is always generated). |
 | `--json` | Output JSON scorecard to stdout only | — | Suppresses spinner and file output. |
 | `--max-violations <n>` | Fail if violation count exceeds threshold | — | For CI gates. |
-| `--output <dir>` | Output directory (legacy v2 flag) | — | Ignored in v3 (output always goes under `./engagements/<id>/`). |
-| `--package-type <type>` | Package format: `scorm12`, `scorm2004`, `aicc`, `xapi`, `auto` | `auto` | Auto-detection is usually correct. |
+| `--output <dir>` | Output directory (legacy v2 flag) | `./open-pathways-report` | Ignored when `--engagement` is set. |
+| `--package-type <type>` | Package format: `scorm12`, `scorm2004`, `aicc`, `cmi5`, `xapi`, `auto` | `auto` | Auto-detection is usually correct. |
 | `--timeout-dynamic <ms>` | Timeout per SCO for dynamic checks | `30000` | |
 | `-v, --version` | Print version | — | |
 
@@ -128,7 +134,7 @@ v3 organizes all output under engagement-namespaced directories to prevent cross
     (+ _library-rollup.md)
 ```
 
-The **HTML report is the primary deliverable**, matching the visual contract in `mockups/assessment-mock-v1.html`. It includes:
+The **HTML report is the primary deliverable**, matching the visual contract in `archive/mockups/assessment-mock-v1.html`. It includes:
 
 - Cover with engagement metadata (engagement ID, package name, date, WCAG version)
 - Executive summary with pass/fail, score, top stats
@@ -166,26 +172,25 @@ Effort estimates are derived from effort-calibration.json and roll up at package
 
 ### Brand assets (`config/brand.json`)
 
-Default brand config shipped with the tool. Overridable per engagement with `--brand-config <path>`.
+Default brand config shipped with the tool. Overridable per engagement with `--brand-config <path>`. Flat key/value shape — keys map directly onto CSS custom properties in the HTML report.
 
 ```json
 {
+  "mark": "SL",
   "name": "Skill Loop",
   "tagline": "Cornerstone OnDemand specialists",
-  "logoMark": "SL",
-  "colors": {
-    "paper": "#f3efe6",
-    "accent": "#2f7d72",
-    "cta": "#f28619"
-  },
-  "fonts": {
-    "jersey": "Archivo Black",
-    "display": "Space Grotesk",
-    "sans": "Inter",
-    "mono": "JetBrains Mono"
-  }
+  "paper": "#f3efe6",
+  "ink": "#111633",
+  "accent": "#2f7d72",
+  "cta": "#f28619",
+  "sev-critical": "#c46a14",
+  "sev-serious": "#de8a2e",
+  "sev-moderate": "#55597a",
+  "sev-minor": "#948a74"
 }
 ```
+
+See the shipped `config/brand.json` for the full set of supported keys (paper / ink / rule tonal scales, accent variants, severity colors).
 
 ### Effort calibration (`config/effort-calibration.json`)
 
@@ -264,7 +269,7 @@ Requires Node.js 18+.
 Open Pathways operates in three layers:
 
 1. **Parser** (`src/parser/`) — Detects SCORM 1.2, SCORM 2004, AICC, cmi5, xAPI manifests and extracts entry points.
-2. **Checks** (`src/checks/`, `src/dynamic-checks/`) — 21 static WCAG criteria + 3 dynamic browser-based criteria. Powered by axe-core for contrast and semantic analysis.
+2. **Checks** (`src/checks/`, `src/dynamic-checks/`) — 21 static WCAG criteria plus dynamic browser-based checks (focus order, focus visible, consistent identification, name/role/value, status messages) executed against the live accessibility tree. Powered by axe-core for contrast and semantic analysis.
 3. **Reporter** (`src/reporter/`) — Converts findings into brand-matched HTML/Markdown reports, JSON scorecards, and Section 508 mapping tables. v3 layers triage taxonomy, scope estimation, and multi-engagement output isolation on top.
 
 The audit engine and dynamic checks are unchanged from v2. The report layer, defaults, and CLI surface are what changed in v3.
@@ -306,4 +311,4 @@ node src/cli.js audit test/fixtures/scorm12-clean.zip --engagement TEST
 
 ## License
 
-MIT. See LICENSE for details.
+MIT (per `package.json`).

@@ -2,7 +2,8 @@
 
 Local web UI for the [Open Pathways](../README.md) SCORM/AICC accessibility
 auditor. Drop a `.zip` into the browser, watch progress stream in, read the
-WCAG 2.2 AA report inline.
+report inline. Standard selector defaults to WCAG 2.1 AA (matching the CLI's
+v3 default); WCAG 2.2 is available as an opt-in toggle.
 
 This is a thin layer on top of the audit core in `../src`. Audit logic lives
 there and is **never duplicated here** — the web app calls `audit()` as a

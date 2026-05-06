@@ -4,7 +4,7 @@
 **Date:** 2026-05-05
 **Author:** Dave Nguyen
 **Built by:** Claude (autonomous)
-**Supersedes:** [PRD v2.0](./PRD_SCORM_WCAG22.md) (2026-04-30). The v1/v2 audit engine, dynamic checks, and mechanical auto-fix all remain in scope. v3 reframes the deliverable, defaults, and primary user without rebuilding the engine underneath.
+**Supersedes:** [PRD v2.0](../archive/phase-docs/PRD_SCORM_WCAG22.md) (2026-04-30). The v1/v2 audit engine, dynamic checks, and mechanical auto-fix all remain in scope. v3 reframes the deliverable, defaults, and primary user without rebuilding the engine underneath.
 
 ---
 

@@ -33,7 +33,7 @@ months, that's the time to extract — not before.
 
 ---
 
-## Folder structure (target — most subdirs filled in over Phases 5–10)
+## Folder structure
 
 ```
 cloud/
@@ -134,12 +134,15 @@ cloud/
 
 ## Distribution
 
-- **Local dev (cloud-mode):** `docker compose up` brings up Postgres + MinIO,
-  then `npm run dev --prefix cloud` runs the app pointing at them.
+- **Local dev (cloud-mode):** `docker compose -f cloud/docker-compose.yml up -d`
+  brings up Postgres + MinIO + mail-capture, then `node cloud/server/index.js`
+  (or `npm run cloud` from project root) runs the app pointing at them.
 - **Local dev (hosted-mode-lite):** `OPEN_PATHWAYS_MODE=hosted` with env vars
   pointing at any Postgres + S3 — exercises the full hardened path.
-- **Production:** Docker image deployed via Coolify. Coolify provisions
-  Postgres, MinIO, env vars, TLS.
+- **Production:** Docker image (`cloud/Dockerfile`) deployed via Coolify with
+  the root `docker-compose.yaml`. Coolify provisions Postgres; MinIO ships
+  in the compose stack. See `DEPLOY.md`.
+- **Worker:** runs from the same image with `node cloud/worker/index.js`.
 - **Not** published to npm. Not a CLI. Not standalone.
 
 ---
@@ -178,6 +181,6 @@ clearly. Each entry: phase, file, one-line reason.
 
 ## Status
 
-- Phase 5 (Persistence) — **next up**.
-- Phases 5 through 11 spec'd in `ROADMAP.md`.
+- Phases 5–10 shipped: persistence, real cancellation (`AbortSignal`), baseline diff + auto-fix in the UI, batch upload, hosted hardening (helmet + rate limit + magic-link + quotas + retention), Docker image, Coolify deploy.
+- Phase 11 (later items: Stripe billing, admin UI, trends dashboard) preserved in `ROADMAP.md` as historical context, not currently active.
 - `/web` Phases 1–4 complete; serves as reference implementation.

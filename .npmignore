@@ -2,12 +2,15 @@
 test/
 test/fixtures/
 
-# Internal documentation and checklists
-docs/PRD_SCORM_WCAG22.md
-docs/PHASE3_PLAN.md
+# Internal documentation
 CLAUDE.md
-INSTALL_REQUIRED.md
-PUBLISH.md
+
+# Engagement output (per-client; should never ship)
+engagements/
+
+# Web + cloud surfaces (the npm package, if ever published, would be CLI-only)
+web/
+cloud/
 
 # Development and reference materials
 archive/

@@ -5,10 +5,9 @@
   "description": "Hosted multi-tenant version of the Open Pathways SCORM/AICC accessibility auditor",
   "main": "server/index.js",
   "scripts": {
-    "dev": "echo 'Phase 5 not started yet — see cloud/ROADMAP.md'",
-    "start": "echo 'Phase 5 not started yet — see cloud/ROADMAP.md'",
-    "worker": "echo 'Worker arrives in Phase 9 — see cloud/ROADMAP.md'",
-    "migrate": "echo 'Migrations land in Phase 5 — see cloud/ROADMAP.md'"
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "worker": "node worker/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.658.0",
