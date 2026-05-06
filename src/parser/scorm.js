@@ -22,6 +22,13 @@ async function parseScormPackage(packageRoot, version) {
     throw new Error('imsmanifest.xml not found.');
   }
 
+  // Calculate the manifest's directory relative to packageRoot.
+  // If manifest is at packageRoot/imsmanifest.xml, manifestDir is empty.
+  // If manifest is at packageRoot/Alcohol-and-Drug-Awareness/imsmanifest.xml,
+  // manifestDir is "Alcohol-and-Drug-Awareness".
+  const manifestDir = path.relative(packageRoot, path.dirname(manifestPath));
+  const manifestDirPrefix = manifestDir && manifestDir !== '.' ? manifestDir + '/' : '';
+
   // Read and parse XML
   const manifestContent = await readText(manifestPath);
   const parser = new xml2js.Parser({ ignoreAttrs: false, attrNameProcessors: [fixAttrCase] });
@@ -59,7 +66,7 @@ async function parseScormPackage(packageRoot, version) {
     const organizationManifestBase = defaultOrganization.$?.['xml:base'] || manifest.$?.['xml:base'] || './';
     const resourcesArray = manifest.resources || [];
     const resourcesElement = Array.isArray(resourcesArray) ? resourcesArray[0] : resourcesArray;
-    collectItemHrefs(defaultOrganization.item, entryPoints, seenHrefs, resourcesElement || {}, organizationManifestBase, packageRoot, scos);
+    collectItemHrefs(defaultOrganization.item, entryPoints, seenHrefs, resourcesElement || {}, organizationManifestBase, packageRoot, scos, manifestDirPrefix);
   }
 
   // Normalize paths to forward slashes
@@ -96,8 +103,9 @@ async function parseScormPackage(packageRoot, version) {
  * @param {string} baseUrl - xml:base for resolving relative paths
  * @param {string} packageRoot - Root directory for existence checks
  * @param {array} scos - Accumulator for SCO objects
+ * @param {string} manifestDirPrefix - Prefix path to prepend to relative hrefs (e.g., "Alcohol-and-Drug-Awareness/")
  */
-function collectItemHrefs(items, entryPoints, seenHrefs, resources, baseUrl, packageRoot, scos) {
+function collectItemHrefs(items, entryPoints, seenHrefs, resources, baseUrl, packageRoot, scos, manifestDirPrefix = '') {
   if (!items) return;
 
   const itemArray = Array.isArray(items) ? items : [items];
@@ -109,7 +117,9 @@ function collectItemHrefs(items, entryPoints, seenHrefs, resources, baseUrl, pac
     if (identifierref) {
       const href = resolveResourceHref(identifierref, resources, baseUrl);
       if (href) {
-        seenHrefs.add(href);
+        // Prepend manifest directory prefix if the href is relative (doesn't start with /)
+        const prefixedHref = href.startsWith('/') ? href : manifestDirPrefix + href;
+        seenHrefs.add(prefixedHref);
         // Extract SCO metadata
         const itemId = item.$?.identifier;
         const titleElement = item.title;
@@ -118,7 +128,7 @@ function collectItemHrefs(items, entryPoints, seenHrefs, resources, baseUrl, pac
           scos.push({
             id: itemId,
             title: typeof title === 'string' ? title : title,
-            entryFile: href,
+            entryFile: prefixedHref,
           });
         }
       }
@@ -126,7 +136,7 @@ function collectItemHrefs(items, entryPoints, seenHrefs, resources, baseUrl, pac
 
     // Recurse into child items
     if (item.item) {
-      collectItemHrefs(item.item, entryPoints, seenHrefs, resources, baseUrl, packageRoot, scos);
+      collectItemHrefs(item.item, entryPoints, seenHrefs, resources, baseUrl, packageRoot, scos, manifestDirPrefix);
     }
   }
 }

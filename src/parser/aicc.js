@@ -18,6 +18,10 @@ async function parseAiccPackage(packageRoot) {
     throw new Error('AICC .crs file not found.');
   }
 
+  // Calculate the manifest directory prefix (same logic as SCORM)
+  const crsDir = path.relative(packageRoot, path.dirname(crsPath));
+  const crsPrefix = crsDir && crsDir !== '.' ? crsDir + '/' : '';
+
   // Parse .crs (INI-like format)
   const crsContent = await readText(crsPath);
   const crsData = parseIniLike(crsContent);
@@ -68,19 +72,22 @@ async function parseAiccPackage(packageRoot) {
     // Normalize to forward slashes
     fileName = fileName.replace(/\\/g, '/');
 
+    // Prepend crs directory prefix if the filename is relative (doesn't start with /)
+    const prefixedFileName = fileName.startsWith('/') ? fileName : crsPrefix + fileName;
+
     // Deduplicate
-    if (seenFiles.has(fileName)) continue;
-    seenFiles.add(fileName);
+    if (seenFiles.has(prefixedFileName)) continue;
+    seenFiles.add(prefixedFileName);
 
     // Check if it's an HTML file
-    const isHtml = fileName.toLowerCase().endsWith('.html') || fileName.toLowerCase().endsWith('.htm');
+    const isHtml = prefixedFileName.toLowerCase().endsWith('.html') || prefixedFileName.toLowerCase().endsWith('.htm');
 
     if (isHtml) {
-      entryPoints.push(fileName);
+      entryPoints.push(prefixedFileName);
     } else {
       // Non-HTML entry points (may be wrappers or dynamic loaders)
-      unconventionalEntries.push(fileName);
-      entryPoints.push(fileName);
+      unconventionalEntries.push(prefixedFileName);
+      entryPoints.push(prefixedFileName);
     }
   }
 

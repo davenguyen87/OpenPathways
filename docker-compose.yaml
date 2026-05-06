@@ -63,16 +63,19 @@ services:
     expose:
       - "80"
     healthcheck:
+      # Mirrors the Coolify app-level healthcheck values that were tuned via
+      # the Coolify API on 2026-05-06 to fix chronic 502s. Coolify's own
+      # defaults (interval=5s, timeout=5s, start_period=5s) were too tight
+      # for /api/health which pings Postgres + S3; legitimate responses can
+      # take >5s under load and during cold start. Coolify's tighter loop
+      # was marking the container unhealthy → Traefik stops routing → 502.
+      # Both layers (docker compose + Coolify app config) now agree on the
+      # values below. Coolify-side values persist in its DB; these compose
+      # values are the source of truth in code.
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:80/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
-      timeout: 5s
+      timeout: 15s
       retries: 3
-      # 60s start_period (was 30s) — the cloud requires Postgres + MinIO ready
-      # before /api/health can return 200, and on Coolify cold-start that
-      # warm-up sometimes pushes past 30s. The shorter window led Coolify to
-      # mark the container running:unhealthy during the v3.0.1 rollout even
-      # though the app was actually serving fine. Wider buffer here removes
-      # the false-unhealthy window during deploy transitions.
       start_period: 60s
     volumes:
       - mail:/var/op/mail
