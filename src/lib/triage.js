@@ -9,6 +9,18 @@
 /**
  * Ordered triage tiers (low effort → high effort / cost)
  * Used for rollup aggregation: "dominant" tier = highest in this list present
+ *
+ * --- Convention note ---
+ * Tier names use SPACES (e.g., 'auto-fix safe'), matching the PRD's prose
+ * naming. This is the canonical key format used in scorecard.triage.rollup.byTriage,
+ * config/effort-calibration.json, every reporter, and any API response that
+ * includes triage data.
+ *
+ * If you need a CSS-class-friendly form for DOM rendering, use tierToClass()
+ * below. Do NOT redefine the tier list elsewhere with a different format —
+ * the v3.0.1 cloud-UI deploy hit exactly this trap (client used hyphens
+ * 'auto-fix-safe' to look up keys that were stored with spaces; rollup
+ * always rendered empty as a result).
  */
 const TRIAGE_TIERS = [
   'auto-fix safe',
@@ -17,6 +29,19 @@ const TRIAGE_TIERS = [
   'content rework',
   'recommend retire'
 ];
+
+/**
+ * Convert a triage tier name to a CSS-class-friendly form.
+ * 'auto-fix safe' → 'auto-fix-safe'
+ *
+ * Use this when generating CSS class names or HTML data attributes from
+ * tier names. Always look up byTriage[tier] using the canonical (spaced)
+ * form — never use the hyphenated form for object key lookups.
+ */
+function tierToClass(tier) {
+  if (typeof tier !== 'string') return '';
+  return tier.replace(/\s+/g, '-');
+}
 
 /**
  * Map criterion ID to its fixer's presence, if one exists.
@@ -179,6 +204,7 @@ function dominantTriage(triageCounts, allViolations = []) {
 
 module.exports = {
   TRIAGE_TIERS,
+  tierToClass,
   tagFinding,
   tagAllFindings,
   dominantTriage,

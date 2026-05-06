@@ -67,7 +67,13 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      # 60s start_period (was 30s) — the cloud requires Postgres + MinIO ready
+      # before /api/health can return 200, and on Coolify cold-start that
+      # warm-up sometimes pushes past 30s. The shorter window led Coolify to
+      # mark the container running:unhealthy during the v3.0.1 rollout even
+      # though the app was actually serving fine. Wider buffer here removes
+      # the false-unhealthy window during deploy transitions.
+      start_period: 60s
     volumes:
       - mail:/var/op/mail
     # Attach to the shared coolify network so we can reach Coolify-managed
