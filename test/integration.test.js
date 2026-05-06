@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -8,6 +8,17 @@ import { generateSarif } from '../src/reporter/sarif.js';
 
 // Get __dirname equivalent
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Belt-and-suspenders: sweep any stray .baseline-temp-* dirs left by killed runs.
+afterAll(() => {
+  for (const entry of fs.readdirSync(__dirname)) {
+    if (entry.startsWith('.baseline-temp')) {
+      try {
+        fs.rmSync(path.join(__dirname, entry), { recursive: true, force: true });
+      } catch {}
+    }
+  }
+});
 
 // Load expected results from fixtures synchronously
 const expectedDataPath = path.join(__dirname, 'fixtures', 'expected.json');
@@ -142,14 +153,9 @@ describe('Phase 2: Baseline diff', { timeout: 30000 }, () => {
 
       expect(diff.length).toBe(0);
     } finally {
-      // Cleanup - attempt with fs.rmSync if available, fallback to manual unlink
+      // Cleanup — recursive rm so stray contents don't leave the dir behind.
       try {
-        if (fs.existsSync(baselineFilePath)) {
-          fs.unlinkSync(baselineFilePath);
-        }
-        if (fs.existsSync(tempBaselineDir)) {
-          fs.rmdirSync(tempBaselineDir);
-        }
+        fs.rmSync(tempBaselineDir, { recursive: true, force: true });
       } catch (cleanupErr) {
         // Silent fail on cleanup - don't fail the test due to cleanup issues
       }
