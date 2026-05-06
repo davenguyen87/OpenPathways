@@ -1662,6 +1662,30 @@ input[type="file"][hidden] { display: none; }
 }
 
 
+.batch-rollup {
+  padding: var(--s-4) 0;
+  border-top: 1px solid var(--rule);
+  margin-top: var(--s-4);
+}
+.batch-rollup h2 {
+  margin: 0 0 var(--s-2) 0;
+  font-family: var(--serif);
+  font-size: var(--fs-lg);
+  font-weight: 400;
+  color: var(--ink);
+}
+.batch-rollup > .muted {
+  margin: 0 0 var(--s-3) 0;
+  font-size: var(--fs-md);
+}
+.batch-rollup-actions {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+
 /* --------------------------------------------------------------------
    Help / kbd
    -------------------------------------------------------------------- */

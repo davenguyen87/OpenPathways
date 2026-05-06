@@ -224,37 +224,262 @@
   }
 
   async function startBatch(files) {
+    // Phase 2: bounded XHR uploader with exponential backoff retry on 5xx.
+    // One file per request. Max 3 uploads in flight. Exits with SSE subscription.
+
     setView('batch');
     const tbody = $('#batch-tbody');
     if (tbody) tbody.innerHTML = '';
     const subtitle = $('#batch-subtitle');
-    if (subtitle) subtitle.textContent = `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`;
+    if (subtitle) subtitle.textContent = 'Preparing batch…';
 
     const prefs = readPrefsFromForm();
     savePrefs(prefs);
 
-    const form = new FormData();
-    for (const f of files) form.append('package', f);
-    form.append('standard', prefs.standard);
-    form.append('packageType', prefs.packageType);
+    // Determine engagement ID.
+    const engagementId = 'web-' + Date.now();
 
+    // Step 1: Create batch
     let resp;
     try {
-      resp = await fetch('/api/audits/batch', { method: 'POST', body: form });
+      resp = await fetch('/api/batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engagementId, count: files.length }),
+      });
     } catch (err) {
-      showError(`Batch upload failed: ${err.message}`);
+      showError(`Batch creation failed: ${err.message}`);
       return;
     }
     if (!resp.ok) {
-      let msg = `Batch upload failed (HTTP ${resp.status})`;
+      let msg = `Batch creation failed (HTTP ${resp.status})`;
       try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
       showError(msg);
       return;
     }
-    const data = await resp.json();
-    state.batchId = data.batchId;
-    pushBatchUrl(data.batchId);
-    loadBatchView(data.batchId);
+    const batchData = await resp.json();
+    const batchId = batchData.batchId;
+    state.batchId = batchId;
+    pushBatchUrl(batchId);
+
+    // Step 2: Seed the batch table with rows for all files (status: uploading, tmp-N job IDs)
+    if (tbody) {
+      files.forEach((f, idx) => {
+        const row = seedBatchRow(f, idx, batchId);
+        tbody.appendChild(row);
+      });
+    }
+
+    // Step 3: Start bounded uploader (3 in flight)
+    const uploadQueue = files.map((f, idx) => ({ file: f, index: idx }));
+    const inFlight = new Set();
+    let completedOrFailed = 0;
+
+    const doUpload = async (item) => {
+      const { file, index } = item;
+      const rowEl = tbody ? tbody.querySelector(`tr[data-tmp-id="tmp-${index}"]`) : null;
+      if (!rowEl) return; // Safety check
+
+      const uploadFile = async () => {
+        return uploadOneFile(file, batchId, index, rowEl, prefs);
+      };
+
+      try {
+        const jobId = await uploadFile();
+        // jobId should now be on the row; updateBatchRow was called internally
+      } catch (err) {
+        // Already handled in uploadOneFile (marked as error)
+      } finally {
+        completedOrFailed++;
+        updateSubtitle(subtitle, files.length, completedOrFailed);
+        inFlight.delete(item);
+        processQueue();
+      }
+    };
+
+    const processQueue = () => {
+      while (inFlight.size < 3 && uploadQueue.length > 0) {
+        const item = uploadQueue.shift();
+        inFlight.add(item);
+        doUpload(item);
+      }
+    };
+
+    // Kick off the queue
+    processQueue();
+
+    // Poll until all uploads complete (either success or final failure)
+    await new Promise((resolve) => {
+      const checkDone = () => {
+        if (uploadQueue.length === 0 && inFlight.size === 0) {
+          resolve();
+        } else {
+          setTimeout(checkDone, 100);
+        }
+      };
+      checkDone();
+    });
+
+    // Step 4: All uploads done (success or final failure); start SSE
+    if (subtitle) subtitle.textContent = `All ${files.length} uploaded — auditing…`;
+    subscribeBatchEvents(batchId);
+  }
+
+  function seedBatchRow(file, index, batchId) {
+    const tr = el('tr', { 'data-tmp-id': `tmp-${index}`, 'data-job-id': '' });
+    tr.appendChild(el('td', { text: String(index + 1) }));
+    tr.appendChild(el('td', { class: 'batch-name', text: file.name }));
+
+    const statusCell = el('td');
+    statusCell.appendChild(statusPill('uploading'));
+    tr.appendChild(statusCell);
+
+    tr.appendChild(el('td', { class: 'mono', text: '—' }));
+    tr.appendChild(el('td', { class: 'mono', text: '—' }));
+    tr.appendChild(el('td', {}));
+
+    return tr;
+  }
+
+  async function uploadOneFile(file, batchId, index, rowEl, prefs) {
+    // Upload a single file with exponential backoff and 3-retry budget.
+    // On success (200 or 202), update row with real jobId and return jobId.
+    // On final failure, mark row as error.
+    // Throws on unexpected errors; caller handles via try/finally.
+
+    const sha256Hex = await computeSha256(file);
+    let retries = 0;
+    const maxRetries = 3;
+    let backoffMs = 1000;
+
+    while (retries < maxRetries) {
+      try {
+        const result = await uploadFileOnce(file, batchId, sha256Hex);
+        if (result.success) {
+          // HTTP 200 or 202: update row with real jobId
+          updateBatchRowForUpload(rowEl, index, result.jobId, file.name);
+          return result.jobId;
+        }
+        // 4xx: don't retry, mark as error
+        if (result.clientError) {
+          updateBatchRowForError(rowEl, result.error || 'Client error');
+          return null;
+        }
+        // 5xx: retry
+        retries++;
+        if (retries < maxRetries) {
+          await new Promise((res) => setTimeout(res, backoffMs));
+          backoffMs = Math.min(30000, backoffMs * 2);
+        }
+      } catch (err) {
+        // Network error: counts as retryable
+        retries++;
+        if (retries < maxRetries) {
+          await new Promise((res) => setTimeout(res, backoffMs));
+          backoffMs = Math.min(30000, backoffMs * 2);
+        }
+      }
+    }
+
+    // Exhausted retries
+    updateBatchRowForError(rowEl, 'Upload failed after 3 retries');
+    return null;
+  }
+
+  async function uploadFileOnce(file, batchId, sha256Hex) {
+    // One XHR attempt. Returns { success, clientError, jobId, error }.
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      const form = new FormData();
+      form.append('package', file);
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          // Could update row's progress bar here if DOM is available
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status === 200 || xhr.status === 202) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            resolve({ success: true, jobId: data.jobId, clientError: false });
+          } catch (_) {
+            resolve({ success: false, clientError: false, error: 'Invalid response' });
+          }
+        } else if (xhr.status >= 400 && xhr.status < 500) {
+          // 4xx: client error, don't retry
+          let msg = `HTTP ${xhr.status}`;
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data && data.error) msg = data.error;
+          } catch (_) {}
+          resolve({ success: false, clientError: true, error: msg });
+        } else {
+          // 5xx or other: retryable
+          resolve({ success: false, clientError: false, error: `HTTP ${xhr.status}` });
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        resolve({ success: false, clientError: false, error: 'Network error' });
+      });
+
+      xhr.addEventListener('abort', () => {
+        resolve({ success: false, clientError: false, error: 'Upload aborted' });
+      });
+
+      xhr.open('POST', `/api/batches/${batchId}/files`);
+      xhr.setRequestHeader('X-Content-SHA256', sha256Hex);
+      xhr.send(form);
+    });
+  }
+
+  async function computeSha256(file) {
+    // Compute SHA256 of file and return as hex string.
+    const buf = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    const hashArray = Array.from(new Uint8Array(hash));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function updateBatchRowForUpload(rowEl, index, jobId, filename) {
+    // Replace tmp-N with real jobId; set status to 'pending'.
+    if (!rowEl) return;
+    rowEl.setAttribute('data-tmp-id', '');
+    rowEl.setAttribute('data-job-id', jobId);
+    const statusCell = rowEl.children[2];
+    if (statusCell) {
+      statusCell.innerHTML = '';
+      statusCell.appendChild(statusPill('pending'));
+    }
+    // nameCell may need update if filename differs
+    const nameCell = rowEl.children[1];
+    if (nameCell && nameCell.textContent !== filename) {
+      nameCell.textContent = filename;
+    }
+  }
+
+  function updateBatchRowForError(rowEl, errorMsg) {
+    // Mark row as 'error' with a tooltip or visible error.
+    if (!rowEl) return;
+    const statusCell = rowEl.children[2];
+    if (statusCell) {
+      statusCell.innerHTML = '';
+      const pill = statusPill('error');
+      pill.setAttribute('title', errorMsg);
+      statusCell.appendChild(pill);
+    }
+  }
+
+  function updateSubtitle(subtitleEl, total, done) {
+    if (!subtitleEl) return;
+    if (done < total) {
+      subtitleEl.textContent = `Uploading ${total - done} of ${total}…`;
+    } else {
+      subtitleEl.textContent = `All ${total} uploaded — auditing…`;
+    }
   }
 
   async function startAuditFromFile(file) {
@@ -1022,7 +1247,7 @@
     tr.appendChild(el('td', { text: String(n) }));
     tr.appendChild(el('td', {
       class: 'batch-name',
-      text: j.originalName || `(job ${j.id.slice(0, 8)})`,
+      text: j.filename || j.originalName || `(job ${j.id.slice(0, 8)})`,
     }));
 
     const statusCell = el('td');
@@ -1059,6 +1284,10 @@
     if (!tbody) return;
     const row = tbody.querySelector(`tr[data-job-id="${jobId}"]`);
     if (!row) return;
+    if (patch.filename) {
+      const nameCell = row.children[1];
+      if (nameCell) nameCell.textContent = patch.filename;
+    }
     if (patch.status) {
       const statusCell = row.children[2];
       if (statusCell) {
@@ -1082,38 +1311,70 @@
     batchEventSource = es;
     // The server emits an initial 'batch' event with the full job list — we
     // already loaded that via /api/batches/:id, so we ignore it here.
+    // Event schema is documented in docs/BULK_AUDIT_API.md §4.
     es.addEventListener('batch', () => {});
-    es.addEventListener('child-progress', (e) => {
+    es.addEventListener('file.uploaded', (e) => {
       try {
         const d = JSON.parse(e.data);
-        // We could surface stage labels per-row, but the table already
-        // reflects status; per-progress noise would be distracting. Keep
-        // the row marked 'running' until terminal.
+        // A new job entered the batch (the SSE handler polls for late-added
+        // jobs). Refresh the row in case the page wasn't showing it yet.
+        updateBatchRow(d.jobId, { status: 'pending', filename: d.filename });
+      } catch (_) {}
+    });
+    es.addEventListener('file.queued', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        updateBatchRow(d.jobId, { status: 'pending' });
+      } catch (_) {}
+    });
+    es.addEventListener('file.running', (e) => {
+      try {
+        const d = JSON.parse(e.data);
         updateBatchRow(d.jobId, { status: 'running' });
       } catch (_) {}
     });
-    es.addEventListener('child-done', (e) => {
+    es.addEventListener('file.done', (e) => {
       try {
         const d = JSON.parse(e.data);
-        updateBatchRow(d.jobId, { status: 'done', summary: d.summary });
+        updateBatchRow(d.jobId, {
+          status: 'done',
+          summary: { score: d.score, totalViolations: d.totalViolations, passed: d.passed },
+        });
       } catch (_) {}
     });
-    es.addEventListener('child-error', (e) => {
+    es.addEventListener('file.failed', (e) => {
       try {
         const d = JSON.parse(e.data);
-        updateBatchRow(d.jobId, { status: 'error' });
+        updateBatchRow(d.jobId, { status: d.error === 'cancelled' ? 'cancelled' : 'error' });
       } catch (_) {}
     });
-    es.addEventListener('child-cancelled', (e) => {
-      try {
-        const d = JSON.parse(e.data);
-        updateBatchRow(d.jobId, { status: 'cancelled' });
-      } catch (_) {}
+    es.addEventListener('batch.complete', () => {
+      onBatchComplete();
+    });
+    es.addEventListener('ping', () => {
+      // Heartbeat — no action needed, just keeps the connection alive.
     });
     es.addEventListener('error', () => {
-      // Best-effort: server closed the stream once everything was terminal.
-      // No action needed — the table is up to date.
+      // Best-effort: server closed the stream once everything was terminal,
+      // or the network dropped. EventSource auto-reconnects. The snapshot
+      // endpoint covers any gap.
     });
+  }
+
+  // Hook: invoked when batch.complete arrives. Wired by Phase 2C (rollup CTA).
+  function onBatchComplete() {
+    const batchId = state.batchId;
+    if (!batchId) return;
+
+    const htmlEl = $('#batch-rollup-html');
+    const mdEl = $('#batch-rollup-md');
+    const jsonEl = $('#batch-rollup-json');
+    const rollupSection = $('#batch-rollup');
+
+    if (htmlEl) htmlEl.href = `/api/batches/${batchId}/rollup.html`;
+    if (mdEl) mdEl.href = `/api/batches/${batchId}/rollup.md`;
+    if (jsonEl) jsonEl.href = `/api/batches/${batchId}/rollup.json`;
+    if (rollupSection) rollupSection.classList.remove('hidden');
   }
 
   // -------------------------------------------------------------- auth helpers (Phase 9B)
