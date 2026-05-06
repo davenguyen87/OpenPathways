@@ -56,6 +56,23 @@
 
   const fmtPct = (n) => (n == null ? '—' : `${Math.round(n)}%`);
 
+  // Extract a human-readable string from a server error payload. Tolerates
+  // both the legacy `{ error: "string" }` shape and the structured contract
+  // `{ error: { code, message, details? } }` (BULK_AUDIT_API.md §6).
+  // Without this, `msg = j.error` on a structured error renders as
+  // "[object Object]" — exactly the bug we hit on the live site.
+  const errorText = (payload, fallback) => {
+    if (!payload) return fallback;
+    const e = payload.error;
+    if (!e) return fallback;
+    if (typeof e === 'string') return e;
+    if (typeof e === 'object') {
+      if (e.message) return e.message;
+      if (e.code) return e.code;
+    }
+    return fallback;
+  };
+
   const stageLabels = {
     'extracting': 'Extracting package',
     'static-checks-start': 'Starting static checks',
@@ -253,7 +270,7 @@
     }
     if (!resp.ok) {
       let msg = `Batch creation failed (HTTP ${resp.status})`;
-      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
       showError(msg);
       return;
     }
@@ -413,7 +430,7 @@
           let msg = `HTTP ${xhr.status}`;
           try {
             const data = JSON.parse(xhr.responseText);
-            if (data && data.error) msg = data.error;
+            msg = errorText(data, msg);
           } catch (_) {}
           resolve({ success: false, clientError: true, error: msg });
         } else {
@@ -432,6 +449,11 @@
 
       xhr.open('POST', `/api/batches/${batchId}/files`);
       xhr.setRequestHeader('X-Content-SHA256', sha256Hex);
+      // CSRF: the global window.fetch wrapper auto-injects this header on
+      // state-changing fetches, but XMLHttpRequest bypasses that wrapper —
+      // so we re-add the header here. Without this, hosted-mode uploads
+      // fail with 403 csrf_failed.
+      if (auth.csrfToken) xhr.setRequestHeader('X-CSRF-Token', auth.csrfToken);
       xhr.send(form);
     });
   }
@@ -510,7 +532,7 @@
 
     if (!resp.ok) {
       let msg = `Upload failed (HTTP ${resp.status})`;
-      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
       showError(msg);
       return;
     }
@@ -638,7 +660,7 @@
       // Browser fires 'error' both for protocol errors and our explicit
       // 'event: error' messages; the latter has parseable JSON in e.data.
       let msg = null;
-      try { if (e && e.data) { const j = JSON.parse(e.data); msg = j.error; } } catch (_) {}
+      try { if (e && e.data) { const j = JSON.parse(e.data); msg = errorText(j, null); } } catch (_) {}
       if (msg) {
         es.close();
         showError(`Audit failed: ${msg}`);
@@ -1097,7 +1119,7 @@
 
     if (!resp.ok) {
       let msg = `Preview failed (HTTP ${resp.status})`;
-      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
       renderFixModalError(msg);
       return;
     }
@@ -1177,7 +1199,7 @@
       apply.removeAttribute('disabled');
       apply.textContent = 'Apply & re-audit';
       let msg = `Apply failed (HTTP ${resp.status})`;
-      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
       renderFixModalError(msg);
       return;
     }
@@ -1464,7 +1486,7 @@ async function loadCurrentUser() {
       if (status) status.textContent = 'Too many attempts. Try again in a few minutes.';
     } else {
       let msg = `Could not send sign-in link (HTTP ${resp.status})`;
-      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
       if (status) status.textContent = msg;
     }
     if (submit) submit.removeAttribute('disabled');
