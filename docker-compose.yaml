@@ -76,7 +76,12 @@ services:
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 60s
+      # 90s — Playwright base image + Postgres + MinIO warmup occasionally
+      # crosses 60s on cold rebuilds, marking the web container unhealthy
+      # and stopping Traefik routing. 90s gives cold-start the headroom it
+      # needs. Coolify-side app healthcheck must match (Settings →
+      # Healthcheck → Start Period); already updated via API on 2026-05-06.
+      start_period: 90s
     volumes:
       - mail:/var/op/mail
     # Attach to the shared coolify network so we can reach Coolify-managed
