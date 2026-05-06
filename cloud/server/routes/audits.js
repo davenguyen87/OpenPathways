@@ -651,6 +651,7 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
           standard: (hot.options && hot.options.standard) || 'wcag22',
           packageType: hot.result.packageType,
           packagePath: path.basename(hot.uploadPath || ''),
+          engagementId: req.params.id,
         },
       });
 
@@ -710,6 +711,62 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
       res.status(500).json({ error: `Report error: ${err.message}` });
     } finally {
       fsp.rm(scratch, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/audits/:id/report.html  (v3)
+  // ------------------------------------------------------------------
+  router.get('/audits/:id/report.html', ...auth, async (req, res) => {
+    let hot;
+    try { hot = await jobs.get(req.params.id, ownerFilter(req)); }
+    catch (err) { return res.status(500).json({ error: `Lookup failed: ${err.message}` }); }
+    if (!hot) return res.status(404).json({ error: 'Job not found' });
+    if (hot.status !== 'done') {
+      return res.status(409).json({ error: `Job not done (status: ${hot.status})` });
+    }
+
+    try {
+      const { renderHtml } = require('../../../src/reporter/html');
+
+      // Enrich the scorecard with v3 fields by calling writeReports with engagementId
+      const enrichResult = await writeReports({
+        scorecard: hot.result.scorecard,
+        violations: hot.result.violations,
+        manualReview: hot.result.manualReview,
+        scos: hot.result.scos,
+        dynamicReport: hot.result.dynamicReport,
+        fixesApplied: hot.result.fixesApplied,
+        options: {
+          json: true,
+          standard: (hot.options && hot.options.standard) || 'wcag22',
+          packageType: hot.result.packageType,
+          packagePath: path.basename(hot.uploadPath || ''),
+          engagementId: req.params.id,
+        },
+      });
+
+      // Parse the enriched scorecard from JSON
+      let enrichedScorecard;
+      try {
+        const parsed = JSON.parse(enrichResult.jsonString);
+        enrichedScorecard = parsed;
+      } catch (_) {
+        enrichedScorecard = hot.result.scorecard;
+      }
+
+      // Render HTML directly using the enriched scorecard
+      const htmlReport = renderHtml(enrichedScorecard, {
+        engagementId: req.params.id,
+      });
+
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': `attachment; filename="audit-${req.params.id}.html"`,
+      });
+      res.send(htmlReport);
+    } catch (err) {
+      res.status(500).json({ error: `Report error: ${err.message}` });
     }
   });
 

@@ -31,3 +31,8 @@ yarn-error.log*
 # Misc
 .cache/
 coverage/
+
+# v3 — audit deliverables, not source
+engagements/
+open-pathways-report/
+test-triage-scope.js

@@ -1,0 +1,22 @@
+{
+  "mark": "SL",
+  "name": "Skill Loop",
+  "tagline": "Cornerstone OnDemand specialists",
+  "paper": "#f3efe6",
+  "paper-2": "#ebe5d6",
+  "paper-3": "#e3dcc8",
+  "ink": "#111633",
+  "ink-2": "#2a3158",
+  "ink-3": "#55597a",
+  "rule": "#c8bfa8",
+  "rule-2": "#948a74",
+  "accent": "#2f7d72",
+  "accent-deep": "#1d4f48",
+  "accent-soft": "rgba(47,125,114,0.14)",
+  "cta": "#f28619",
+  "ok": "#1b7a3d",
+  "sev-critical": "#c46a14",
+  "sev-serious": "#de8a2e",
+  "sev-moderate": "#55597a",
+  "sev-minor": "#948a74"
+}

@@ -7,7 +7,7 @@ const fs = require('fs');
  * @returns {object} Scorecard object matching the PRD JSON shape
  */
 function buildScorecard({ violations, manualReview, options, checks, scos, dynamicReport, fixesApplied, dynamicCheckIds }) {
-  const { standard = 'wcag22', packageType, packagePath, maxViolations } = options;
+  const { standard = 'wcag22', packageType, packagePath, maxViolations, iframeWarnings = [], engagementId, clientName } = options;
   const dynIds = dynamicCheckIds instanceof Set ? dynamicCheckIds : new Set();
   const simulateRan = !!(dynamicReport && dynamicReport.skipped === false);
   // A dynamic criterion is "not evaluated" when --simulate didn't run successfully.
@@ -165,6 +165,15 @@ function buildScorecard({ violations, manualReview, options, checks, scos, dynam
       enriched.sco = v.sco;
     }
 
+    // v3.0 enrichments (per PRD §Acceptance criteria > Section 508 mapping):
+    // every finding includes section508, triage, and effortMinutes when the
+    // upstream pipeline has populated them. Defensive — when v2 callers run
+    // without the v3 enrichment middlewares, these fields are simply absent.
+    if (typeof v.section508 !== 'undefined') enriched.section508 = v.section508;
+    if (typeof v.triage !== 'undefined') enriched.triage = v.triage;
+    if (typeof v.effortMinutes !== 'undefined') enriched.effortMinutes = v.effortMinutes;
+    if (typeof v.llmProvenance !== 'undefined') enriched.llmProvenance = v.llmProvenance;
+
     return enriched;
   });
 
@@ -192,8 +201,16 @@ function buildScorecard({ violations, manualReview, options, checks, scos, dynam
     criteria,
     violations: enrichedViolations,
     manualReviewRequired: manualReview,
-    iframeWarnings: options.iframeWarnings || [],
+    iframeWarnings,
   };
+
+  // Add engagement metadata if present (v3 enrichment)
+  if (engagementId) {
+    scorecard.engagementId = engagementId;
+  }
+  if (clientName) {
+    scorecard.clientName = clientName;
+  }
 
   // Add SCOs if present
   if (scos && scos.length > 0) {

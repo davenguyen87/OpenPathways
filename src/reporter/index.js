@@ -2,23 +2,29 @@ const fs = require('fs').promises;
 const path = require('path');
 const { buildScorecard, serializeScorecard } = require('./json');
 const { renderMarkdown } = require('./markdown');
+const { renderMarkdownV3 } = require('./markdown-v3');
+const { renderHtml } = require('./html');
 const { renderText } = require('./text');
 const { generateSarif } = require('./sarif');
 const { loadChecks } = require('../lib/load-checks');
 const { loadDynamicChecks } = require('../lib/load-dynamic-checks');
+const { mapAllFindings } = require('../lib/section508');
+const { tagAllFindings, dominantTriage, TRIAGE_TIERS } = require('../lib/triage');
+const { estimateAllEfforts, rollupPackage, loadCalibration } = require('../lib/scope-estimator');
+const { buildSection508Table } = require('../lib/section508');
+const { extractTopRisks } = require('../lib/top-risks');
 
 /**
  * Main writeReports function.
  *
- * Expected signature:
- * writeReports({ scorecard, violations, manualReview, options, dynamicReport, fixesApplied }): Promise<{ jsonPath?, mdPath?, jsonString? }>
- *
- * Behavior:
- * - When options.json === true: returns jsonString only (no file writes)
- * - Otherwise: writes files to options.output directory and returns paths
+ * Enhanced in v3 to:
+ * 1. Enrich scorecard with v3 fields (triage, scope, 508, topRisks)
+ * 2. Route output to engagement-namespaced paths
+ * 3. Generate HTML reports via renderHtml
+ * 4. Generate v3 Markdown via renderMarkdownV3
  *
  * @param {object} config - { scorecard, violations, manualReview, options, scos, dynamicReport, fixesApplied }
- * @returns {Promise<{ jsonPath?: string, mdPath?: string, jsonString?: string }>}
+ * @returns {Promise<{ jsonPath?: string, mdPath?: string, htmlPath?: string, jsonString?: string }>}
  */
 async function writeReports(config) {
   const { violations, manualReview, options, scos, dynamicReport, fixesApplied } = config;
@@ -27,11 +33,17 @@ async function writeReports(config) {
     json: jsonOnly = false,
     format = 'md',
     output = './open-pathways-report',
-    standard = 'wcag22',
+    standard = 'wcag21',
     packageType,
     packagePath,
     maxViolations,
     iframeWarnings = [],
+    engagementId = null,
+    engagementRedact = false,
+    brandConfigPath = null,
+    llmProvider = null,
+    llmKeyFromEnv = null,
+    clientName = null,
   } = options;
 
   // Load static + dynamic checks; merge so dynamic-only criteria
@@ -60,6 +72,24 @@ async function writeReports(config) {
     return true;
   });
 
+  // ===== V3 ENRICHMENT: Enrich violations BEFORE scorecard building =====
+  // This ensures the enriched violations are included in the scorecard
+  if (engagementId) {
+    // 1. Map all findings to Section 508 references
+    mapAllFindings(violations);
+
+    // 2. Tag each violation with a triage category
+    const context = {
+      packageType: packageType || 'unknown',
+      packageScale: violations.length,
+    };
+    tagAllFindings(violations, context);
+
+    // 3. Estimate effort for each finding
+    const calibration = loadCalibration(brandConfigPath);
+    estimateAllEfforts(violations, calibration);
+  }
+
   // Build scorecard with enriched data.
   // dynamicCheckIds tells the scorecard which criteria require --simulate
   // so it can mark them "not evaluated" when the runner didn't run.
@@ -73,6 +103,8 @@ async function writeReports(config) {
       packagePath,
       maxViolations,
       iframeWarnings,
+      engagementId,
+      clientName,
     },
     checks: checksByStandard,
     scos,
@@ -80,6 +112,42 @@ async function writeReports(config) {
     fixesApplied,
     dynamicCheckIds,
   });
+
+  // ===== V3 POST-SCORECARD ENRICHMENTS =====
+  if (engagementId) {
+    // Build enrichments for the scorecard
+    scorecard.section508Table = buildSection508Table(violations);
+    scorecard.scopeEstimate = rollupPackage(violations);
+    const topRisksResult = extractTopRisks(violations);
+    scorecard.topRisks = topRisksResult.risks || [];
+
+    // Triage rollup: aggregate counts by tag
+    const triageRollup = {};
+    const triageCounts = {};
+    for (const tier of TRIAGE_TIERS) {
+      triageCounts[tier] = 0;
+    }
+    for (const v of violations) {
+      if (v.triage) {
+        triageCounts[v.triage] = (triageCounts[v.triage] || 0) + 1;
+      }
+    }
+    for (const tier of TRIAGE_TIERS) {
+      triageRollup[tier] = triageCounts[tier];
+    }
+    // Also count clean packages (no violations at all)
+    if (violations.length === 0) {
+      triageRollup.clean = 1;
+    }
+
+    const dominantTag = dominantTriage(violations);
+    scorecard.triage = {
+      rollup: {
+        dominantTag,
+        byTriage: triageRollup,
+      },
+    };
+  }
 
   // Serialize to JSON
   const jsonString = serializeScorecard(scorecard);
@@ -89,37 +157,89 @@ async function writeReports(config) {
     return { jsonString };
   }
 
-  // Create output directory if needed
-  await fs.mkdir(output, { recursive: true });
+  // Determine output directory with path traversal protection
+  let outputDir = output;
 
-  // Write JSON file
-  const jsonPath = path.join(output, 'results.json');
-  await fs.writeFile(jsonPath, jsonString, 'utf8');
+  // Resolve the path to prevent directory traversal attacks
+  // When engagementId is provided, ensure output stays within engagements/
+  if (engagementId) {
+    // Normalize the path to remove .. and . segments
+    const resolved = path.resolve(outputDir);
+    const engagementsDir = path.resolve(path.join(process.cwd(), 'engagements'));
 
-  // Render and write report file
-  let reportPath;
-  if (format === 'txt') {
-    const textReport = renderText(scorecard);
-    reportPath = path.join(output, 'report.txt');
-    await fs.writeFile(reportPath, textReport, 'utf8');
-  } else if (format === 'sarif') {
-    const sarifReport = generateSarif({ scorecard, violations });
-    reportPath = path.join(output, 'results.sarif');
-    await fs.writeFile(reportPath, sarifReport, 'utf8');
-  } else {
-    // Default to markdown
-    const mdReport = renderMarkdown(scorecard);
-    reportPath = path.join(output, 'report.md');
-    await fs.writeFile(reportPath, mdReport, 'utf8');
+    // Ensure the resolved path is within engagements/ directory
+    if (!resolved.startsWith(engagementsDir)) {
+      outputDir = path.join(engagementsDir, path.basename(engagementId), path.basename(output || 'report'));
+    } else {
+      outputDir = resolved;
+    }
   }
 
-  return {
+  // Create output directory if needed
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Write JSON file
+  const jsonPath = path.join(outputDir, 'results.json');
+  await fs.writeFile(jsonPath, jsonString, 'utf8');
+
+  let reportPaths = {
     jsonPath,
-    mdPath: format === 'txt' ? undefined : (format === 'sarif' ? undefined : reportPath),
-    txtPath: format === 'txt' ? reportPath : undefined,
-    sarifPath: format === 'sarif' ? reportPath : undefined,
     jsonString,
   };
+
+  // ===== V3 PATH: HTML + v3 Markdown =====
+  if (engagementId) {
+    // Load brand config (use default from config/brand.json if not provided)
+    let brandConfig = null;
+    const brandPath = brandConfigPath || path.join(process.cwd(), 'config', 'brand.json');
+    try {
+      const brandStr = await fs.readFile(brandPath, 'utf8');
+      brandConfig = JSON.parse(brandStr);
+    } catch (err) {
+      // Silent fallback to null — renderHtml has a defaultBrand() function
+      console.warn(`Could not load brand config from ${brandPath}, using defaults`);
+    }
+
+    // Render HTML
+    const htmlReport = renderHtml(scorecard, {
+      brand: brandConfig || undefined,
+      engagementId,
+      redactClientName: engagementRedact,
+    });
+    const htmlPath = path.join(outputDir, 'report.html');
+    await fs.writeFile(htmlPath, htmlReport, 'utf8');
+    reportPaths.htmlPath = htmlPath;
+
+    // Render v3 Markdown
+    const mdReport = renderMarkdownV3(scorecard, {
+      engagementRedact,
+    });
+    const mdPath = path.join(outputDir, 'report.md');
+    await fs.writeFile(mdPath, mdReport, 'utf8');
+    reportPaths.mdPath = mdPath;
+  } else {
+    // ===== V2 BACKWARD COMPAT PATH =====
+    let reportPath;
+    if (format === 'txt') {
+      const textReport = renderText(scorecard);
+      reportPath = path.join(outputDir, 'report.txt');
+      await fs.writeFile(reportPath, textReport, 'utf8');
+      reportPaths.txtPath = reportPath;
+    } else if (format === 'sarif') {
+      const sarifReport = generateSarif({ scorecard, violations });
+      reportPath = path.join(outputDir, 'results.sarif');
+      await fs.writeFile(reportPath, sarifReport, 'utf8');
+      reportPaths.sarifPath = reportPath;
+    } else {
+      // Default to markdown
+      const mdReport = renderMarkdown(scorecard);
+      reportPath = path.join(outputDir, 'report.md');
+      await fs.writeFile(reportPath, mdReport, 'utf8');
+      reportPaths.mdPath = reportPath;
+    }
+  }
+
+  return reportPaths;
 }
 
 module.exports = { writeReports };

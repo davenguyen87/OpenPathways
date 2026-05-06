@@ -1,7 +1,7 @@
 {
   "name": "open-pathways",
-  "version": "2.0.0",
-  "description": "CLI tool that audits SCORM 1.2, SCORM 2004, and AICC packages for WCAG 2.2 AA compliance",
+  "version": "3.0.0",
+  "description": "CLI tool for SCORM/AICC accessibility auditing with WCAG 2.1 AA + Section 508 deliverables, scoped for Cornerstone consultancy engagements",
   "main": "src/index.js",
   "bin": {
     "open-pathways": "src/cli.js"
@@ -11,7 +11,8 @@
     "start": "node src/cli.js",
     "serve": "node web/server/index.js",
     "cloud": "node cloud/server/index.js",
-    "test": "vitest"
+    "test": "vitest",
+    "check-no-network": "node scripts/check-no-network.js"
   },
   "keywords": [
     "scorm",
