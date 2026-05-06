@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-## Project: Open Pathways — Web
+## Project: Prism — Web
 
-A local web UI on top of the Open Pathways CLI. Runs an Express server on `127.0.0.1`, lets developers and QA drop a SCORM/AICC `.zip` into a browser, and streams audit results back as a collapsible report. Reuses the audit core from `../src` — it does not reimplement any checks.
+A local web UI on top of the Prism CLI. Runs an Express server on `127.0.0.1`, lets developers and QA drop a SCORM/AICC `.zip` into a browser, and streams audit results back as a collapsible report. Reuses the audit core from `../src` — it does not reimplement any checks.
 
 Full build plan: `PLAN.md`
 
@@ -32,7 +32,7 @@ web/
 - **Reuse, don't fork.** The web app calls `audit()` from `../src/index.js`. It must never duplicate check logic. The one allowed touch on `../src` is an optional `onProgress` callback in `audit()` options, added in Phase 2.
 - **Progress over SSE.** One-way stream from server to browser; no WebSocket.
 - **In-memory jobs only.** Restart the server, jobs are gone. Reports can be downloaded while the process is alive; persistence is out of scope for v1.
-- **Default port 4280**, override via `OPEN_PATHWAYS_PORT` or `--port`.
+- **Default port 4280**, override via `PRISM_PORT` or `--port`.
 - **Auto-open the browser** on start. `--no-open` skips it (useful for CI smoke tests).
 - **Auto-start audit on drop** — the drop is the intent; no extra "Audit" click.
 - **Backward compat for the CLI.** `../src/cli.js` is not modified by this project.
@@ -45,7 +45,7 @@ Same as the CLI — runs locally from source, not published to npm.
 
 - `npm install` once inside `web/` to pull web-only deps (`express`, `multer`, `open`).
 - `npm run serve` from the project root (or `web/`) starts the server and opens a browser.
-- Optional global shorthand: `npm link` from `web/` registers `open-pathways-web`.
+- Optional global shorthand: `npm link` from `web/` registers `prism-web`.
 
 ---
 

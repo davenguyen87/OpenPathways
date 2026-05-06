@@ -1,7 +1,7 @@
 /**
  * Central deployment-mode + env validation.
  *
- * One module reads OPEN_PATHWAYS_MODE and validates that hosted mode has
+ * One module reads PRISM_MODE and validates that hosted mode has
  * the env vars it needs to start safely. Subsequent phases extend this
  * (auth + allowlist in 9B; pg-boss + quotas in 9C); for now the only
  * hosted-mode requirements are SESSION_SECRET and a recognized
@@ -21,10 +21,10 @@ const VALID_STORAGE_DRIVERS = new Set(['local-fs', 's3']);
 const VALID_MODES = new Set(['local', 'hosted']);
 
 function readMode() {
-  const raw = (process.env.OPEN_PATHWAYS_MODE || 'local').trim().toLowerCase();
+  const raw = (process.env.PRISM_MODE || 'local').trim().toLowerCase();
   if (!VALID_MODES.has(raw)) {
     throw new Error(
-      `Invalid OPEN_PATHWAYS_MODE=${raw} (expected 'local' or 'hosted')`
+      `Invalid PRISM_MODE=${raw} (expected 'local' or 'hosted')`
     );
   }
   return raw;
@@ -62,7 +62,7 @@ function validate() {
     // floor for refuse-to-start.
     if (sessionSecret.length < 32) {
       errors.push(
-        'OPEN_PATHWAYS_MODE=hosted requires SESSION_SECRET (>=32 chars)'
+        'PRISM_MODE=hosted requires SESSION_SECRET (>=32 chars)'
       );
     }
     if (storageDriver === 's3') {

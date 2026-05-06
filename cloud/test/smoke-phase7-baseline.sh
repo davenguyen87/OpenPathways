@@ -35,7 +35,7 @@ fi
 
 start_server() {
   SQLITE_PATH="$SQLITE_PATH" \
-  OPEN_PATHWAYS_RETENTION_DAYS=0 \
+  PRISM_RETENTION_DAYS=0 \
     node "$ROOT/cloud/server/index.js" --no-open --port "$PORT" >>"$SVR_LOG" 2>&1 &
   SVR=$!
   for i in $(seq 1 50); do

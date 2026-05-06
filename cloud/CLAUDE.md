@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-## Project: Open Pathways — Cloud
+## Project: Prism — Cloud
 
-The hosted, multi-tenant version of Open Pathways. Same audit core as the
+The hosted, multi-tenant version of Prism. Same audit core as the
 local CLI and the local web tool, but with persistent storage, magic-link
 auth, a worker queue, S3-compatible object storage, and a deploy target
 of Coolify on a self-hosted VPS.
@@ -18,7 +18,7 @@ Full multi-phase build plan: `ROADMAP.md`
 ## Relationship to the rest of the repo
 
 ```
-OpenPathways/
+Prism/
 ├── src/             ← shared audit core. /web and /cloud both import from here.
 │                       Modify only with explicit reason; document each touch.
 ├── web/             ← v1 local-only tool. Frozen-ish. Do NOT modify from /cloud work.
@@ -77,7 +77,7 @@ cloud/
 - In-app **magic-link via SMTP** (`nodemailer`, MIT), JWT-or-signed-cookie sessions.
 - Email allowlist (`ALLOWLIST_EMAIL_DOMAINS` or `ALLOWLIST_EMAILS`) **required**
   in hosted mode — refuses to start without it.
-- `AUTH_ADAPTER=none` only valid when `OPEN_PATHWAYS_MODE=local`.
+- `AUTH_ADAPTER=none` only valid when `PRISM_MODE=local`.
 - **Temporary deviation (testing window):** `AUTH_ADAPTER=none` is currently allowed
   in hosted mode for the testing phase. This is gated by an explicit env var and
   reversible by removing it or setting to `magic-link`. Re-evaluate before opening
@@ -103,7 +103,7 @@ cloud/
 - No paid APM in v1.
 
 **Privacy.**
-- Default retention: `OPEN_PATHWAYS_RETENTION_DAYS=30`.
+- Default retention: `PRISM_RETENTION_DAYS=30`.
 - `/privacy` page populated at deploy time.
 - No analytics on package contents.
 - Encryption-at-rest left to the storage layer (MinIO server-side encryption
@@ -137,7 +137,7 @@ cloud/
 - **Local dev (cloud-mode):** `docker compose -f cloud/docker-compose.yml up -d`
   brings up Postgres + MinIO + mail-capture, then `node cloud/server/index.js`
   (or `npm run cloud` from project root) runs the app pointing at them.
-- **Local dev (hosted-mode-lite):** `OPEN_PATHWAYS_MODE=hosted` with env vars
+- **Local dev (hosted-mode-lite):** `PRISM_MODE=hosted` with env vars
   pointing at any Postgres + S3 — exercises the full hardened path.
 - **Production:** Docker image (`cloud/Dockerfile`) deployed via Coolify with
   the root `docker-compose.yaml`. Coolify provisions Postgres; MinIO ships

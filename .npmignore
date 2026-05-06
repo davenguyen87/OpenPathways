@@ -45,7 +45,7 @@ build/
 *~
 
 # Output directories (from local runs)
-open-pathways-report/
+prism-report/
 
 # This file itself
 .npmignore

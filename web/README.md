@@ -1,6 +1,6 @@
-# Open Pathways — Web
+# Prism — Web
 
-Local web UI for the [Open Pathways](../README.md) SCORM/AICC accessibility
+Local web UI for the [Prism](../README.md) SCORM/AICC accessibility
 auditor. Drop a `.zip` into the browser, watch progress stream in, read the
 report inline. Standard selector defaults to WCAG 2.1 AA (matching the CLI's
 v3 default); WCAG 2.2 is available as an opt-in toggle.
@@ -26,12 +26,12 @@ bundled fixture.
 
 | Flag                     | Default | Notes                                                              |
 | ------------------------ | ------- | ------------------------------------------------------------------ |
-| `--port <n>`             | `4280`  | Override the listen port. Also reads `OPEN_PATHWAYS_PORT`.         |
+| `--port <n>`             | `4280`  | Override the listen port. Also reads `PRISM_PORT`.         |
 | `--no-open`              | off     | Start the server but don't auto-launch a browser. Useful for CI.   |
 | `-h`, `--help`           | —       | Print help and exit.                                               |
 | `-v`, `--version`        | —       | Print the web package version and exit.                            |
 
-`--port` precedence: explicit flag → `npm_config_port` → `OPEN_PATHWAYS_PORT`
+`--port` precedence: explicit flag → `npm_config_port` → `PRISM_PORT`
 → default `4280`.
 
 ### Running through `npm run serve`
@@ -43,7 +43,7 @@ npm run serve --no-open                    # default port, no browser launch
 npm run serve --port=4291 --no-open        # equals form for --port
 npm run serve -- --no-open --port 4291     # explicit -- separator
 node web/server/index.js --port 4291       # bypass npm entirely
-OPEN_PATHWAYS_PORT=4291 npm run serve      # env override
+PRISM_PORT=4291 npm run serve      # env override
 ```
 
 The space form `npm run serve --port 4291` is a known npm wart — npm consumes
@@ -53,8 +53,8 @@ the default port and prints a warning. Use one of the forms above instead.
 ### Optional global shorthand
 
 ```bash
-cd web && npm link    # registers `open-pathways-web` on PATH
-open-pathways-web --port 4291
+cd web && npm link    # registers `prism-web` on PATH
+prism-web --port 4291
 ```
 
 ## What's where

@@ -88,7 +88,7 @@ class MagicLinkAuth {
     this.store = store;
     this.allowlist = allowlist;
     this.transport = transport;
-    this.from = from || 'Open Pathways <noreply@example.com>';
+    this.from = from || 'Prism <noreply@example.com>';
     this.publicBaseUrl = (publicBaseUrl || '').replace(/\/$/, '');
   }
 
@@ -134,7 +134,7 @@ class MagicLinkAuth {
     await this.transport.sendMail({
       from: this.from,
       to: email,
-      subject: 'Sign in to Open Pathways',
+      subject: 'Sign in to Prism',
       text: [
         'Click the link below to sign in. The link is valid for 15 minutes.',
         '',
@@ -144,7 +144,7 @@ class MagicLinkAuth {
       ].join('\n'),
       html:
         `<p>Click the link below to sign in. The link is valid for 15 minutes.</p>` +
-        `<p><a href="${verifyUrl}">Sign in to Open Pathways</a></p>` +
+        `<p><a href="${verifyUrl}">Sign in to Prism</a></p>` +
         `<p>If you didn't request this, ignore this message.</p>`,
     });
   }

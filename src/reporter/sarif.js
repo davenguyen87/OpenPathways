@@ -8,7 +8,7 @@
  * @returns {string} SARIF JSON string (pretty-printed)
  */
 function generateSarif({ scorecard, violations }) {
-  const { tool = 'open-pathways', version = '1.0.0', criteria = [] } = scorecard;
+  const { tool = 'prism', version = '1.0.0', criteria = [] } = scorecard;
 
   // Build rules array: one rule per criterion with violations
   // Deduplicate by criterion id

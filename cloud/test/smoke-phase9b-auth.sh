@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 9B smoke test — magic-link auth + CSRF + tenant isolation.
 #
-# 1. Boot in OPEN_PATHWAYS_MODE=hosted with sqlite + local-fs + MAIL_CAPTURE_DIR
+# 1. Boot in PRISM_MODE=hosted with sqlite + local-fs + MAIL_CAPTURE_DIR
 #    + allowlist for example.com.
 # 2. POST /api/auth/request {email: alice@example.com} → 200; capture email,
 #    extract verify URL.
@@ -50,12 +50,12 @@ trap cleanup EXIT INT TERM
 [[ -f "$FIXTURE" ]] || { echo "FAIL: fixture missing" >&2; exit 1; }
 
 echo "[boot] hosted mode on :$PORT"
-OPEN_PATHWAYS_MODE=hosted \
+PRISM_MODE=hosted \
 SESSION_SECRET="0123456789abcdef0123456789abcdef0123456789abcdef" \
 ALLOWLIST_EMAIL_DOMAINS="example.com" \
 MAIL_CAPTURE_DIR="$MAIL_DIR" \
 SQLITE_PATH="$SQLITE_PATH" \
-OPEN_PATHWAYS_RETENTION_DAYS=0 \
+PRISM_RETENTION_DAYS=0 \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT" >>"$SVR_LOG" 2>&1 &
 SVR=$!
 for i in $(seq 1 50); do

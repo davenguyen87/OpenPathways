@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Network traffic CI check for Open Pathways v3.0
+ * Network traffic CI check for Prism v3.0
  *
  * This script runs a representative audit (scorm12-clean.zip) with network
  * traffic monitoring enabled. It ensures that the tool produces no unexpected

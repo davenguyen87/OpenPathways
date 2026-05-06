@@ -122,7 +122,7 @@ async function audit(packagePath, options = {}) {
     : () => {};
 
   // Create temp directory for extraction
-  const tempRoot = path.join(os.tmpdir(), `scorm-a11y-${crypto.randomBytes(6).toString('hex')}`);
+  const tempRoot = path.join(os.tmpdir(), `prism-${crypto.randomBytes(6).toString('hex')}`);
   let cleanupDone = false;
 
   // Track this temp root in the module-level set. The single exit handler

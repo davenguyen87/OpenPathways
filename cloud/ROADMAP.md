@@ -1,4 +1,4 @@
-# Open Pathways Cloud — Roadmap
+# Prism Cloud — Roadmap
 
 The hosted, multi-tenant successor to `/web`. Same audit core, but persistent
 storage, real auth, a worker queue, S3-compatible object storage, and a
@@ -35,7 +35,7 @@ unchanged.
   required at boot.
 - **Job queue:** pg-boss on Postgres. No Redis dependency.
 - **Worker concurrency:** 3 Playwright runs (8 GB headroom).
-- **Retention:** 30 days default (`OPEN_PATHWAYS_RETENTION_DAYS`).
+- **Retention:** 30 days default (`PRISM_RETENTION_DAYS`).
 - **Logs:** structured via `pino` → stdout → Coolify logs.
 
 Everything in the dependency graph is OSS (Apache 2.0, MIT, BSD, AGPL for
@@ -111,7 +111,7 @@ distinguishes them.
 5. SSE replay: when a subscriber attaches, replay buffered events from
    `progress_json` then forward live events from the in-memory cache.
 6. Replace the 10-minute cleanup timer with a configurable retention
-   policy: `OPEN_PATHWAYS_RETENTION_DAYS` env var (default `0` in local
+   policy: `PRISM_RETENTION_DAYS` env var (default `0` in local
    mode = forever; default `30` in hosted mode).
 7. Update `_snapshot()` to handle hydrated jobs that may not have an
    in-memory progress array.
@@ -252,10 +252,10 @@ multi-user public server. No fork. Public-internet-grade hardening
 included.
 
 **Success criteria:**
-- `OPEN_PATHWAYS_MODE=hosted` enables auth, per-user job isolation,
+- `PRISM_MODE=hosted` enables auth, per-user job isolation,
   S3 storage, Postgres, and security headers. Refuses to start without
   the required env vars.
-- `OPEN_PATHWAYS_MODE=local` (default) preserves the simple single-user
+- `PRISM_MODE=local` (default) preserves the simple single-user
   behavior for development.
 - A magic-link signup → email → click → session lifecycle works
   end-to-end against a local SMTP test server (e.g. MailHog).
@@ -293,7 +293,7 @@ included.
 **Env contract** (vendor-neutral):
 
 ```
-OPEN_PATHWAYS_MODE=hosted
+PRISM_MODE=hosted
 
 DATABASE_URL=postgres://...
 S3_ENDPOINT=https://minio.example.com
@@ -305,13 +305,13 @@ SMTP_HOST=...
 SMTP_PORT=587
 SMTP_USER=...
 SMTP_PASS=...
-SMTP_FROM="Open Pathways <noreply@example.com>"
+SMTP_FROM="Prism <noreply@example.com>"
 
 SESSION_SECRET=<32+ random bytes hex>
 ALLOWLIST_EMAIL_DOMAINS=mycompany.com
 
 WORKER_CONCURRENCY=3
-OPEN_PATHWAYS_RETENTION_DAYS=30
+PRISM_RETENTION_DAYS=30
 QUOTA_CONCURRENT_JOBS=2
 QUOTA_UPLOADS_PER_DAY=50
 QUOTA_STORED_BYTES=5368709120

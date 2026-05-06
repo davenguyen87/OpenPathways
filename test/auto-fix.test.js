@@ -494,7 +494,7 @@ describe('Auto-Fix: writeFixedZip', { timeout: 30000 }, () => {
     }
 
     const originalZipPath = path.join(fixturesDir, 'scorm12-violations.zip');
-    const outputZipPath = path.join(os.tmpdir(), `scorm-a11y-test-output-${Date.now()}.zip`);
+    const outputZipPath = path.join(os.tmpdir(), `prism-test-output-${Date.now()}.zip`);
 
     // Create mock fixedFiles map
     const mockFixedFiles = new Map();

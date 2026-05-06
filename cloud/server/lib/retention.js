@@ -4,7 +4,7 @@
  * Two policies, run on the same hourly sweep:
  *
  *  1. Time-based retention (Phase 5). Terminal rows older than
- *     OPEN_PATHWAYS_RETENTION_DAYS are deleted from the store and from
+ *     PRISM_RETENTION_DAYS are deleted from the store and from
  *     storage. retentionDays === 0 disables this policy.
  *
  *  2. 80%-cap disk eviction (Phase 9C). When the storage bucket exceeds

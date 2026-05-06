@@ -187,7 +187,7 @@ function buildScorecard({ violations, manualReview, options, checks, scos, dynam
 
   // Build scorecard
   const scorecard = {
-    tool: 'open-pathways',
+    tool: 'prism',
     version: require('../../package.json').version,
     wcagVersion,
     packageType,

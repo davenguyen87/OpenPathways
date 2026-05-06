@@ -1,5 +1,5 @@
 /**
- * Open Pathways Web — frontend.
+ * Prism Web — frontend.
  *
  * Vanilla JS. No framework, no bundler. Three views (idle/running/done) plus
  * an error fallback. SSE for progress, fetch for everything else.

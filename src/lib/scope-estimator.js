@@ -1,5 +1,5 @@
 /**
- * Scope estimator for Open Pathways v3
+ * Scope estimator for Prism v3
  *
  * Computes effort estimates in minutes for individual findings and rolls up
  * at package and library level. Uses calibration tables from

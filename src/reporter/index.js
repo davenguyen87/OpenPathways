@@ -32,7 +32,7 @@ async function writeReports(config) {
   const {
     json: jsonOnly = false,
     format = 'md',
-    output = './open-pathways-report',
+    output = './prism-report',
     standard = 'wcag21',
     packageType,
     packagePath,

@@ -1,8 +1,8 @@
 {
-  "name": "open-pathways-cloud",
+  "name": "prism-cloud",
   "version": "0.1.0",
   "private": true,
-  "description": "Hosted multi-tenant version of the Open Pathways SCORM/AICC accessibility auditor",
+  "description": "Hosted multi-tenant version of the Prism SCORM/AICC accessibility auditor",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

@@ -1,4 +1,4 @@
-# Open Pathways Cloud — local hosted-mode dev via docker-compose.
+# Prism Cloud — local hosted-mode dev via docker-compose.
 #
 #   docker compose -f cloud/docker-compose.yml up
 #
@@ -72,8 +72,8 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      OPEN_PATHWAYS_MODE: hosted
-      OPEN_PATHWAYS_PORT: "4280"
+      PRISM_MODE: hosted
+      PRISM_PORT: "4280"
       DB_DRIVER: postgres
       DATABASE_URL: postgres://${POSTGRES_USER:-openpathways}:${POSTGRES_PASSWORD:-openpathways}@postgres:5432/${POSTGRES_DB:-openpathways}
       STORAGE_DRIVER: s3
@@ -95,14 +95,14 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-Open Pathways <noreply@example.com>}
+      SMTP_FROM: ${SMTP_FROM:-Prism <noreply@example.com>}
       SMTP_SECURE: ${SMTP_SECURE:-false}
-      OPEN_PATHWAYS_RETENTION_DAYS: ${OPEN_PATHWAYS_RETENTION_DAYS:-30}
+      PRISM_RETENTION_DAYS: ${PRISM_RETENTION_DAYS:-30}
       QUOTA_CONCURRENT_JOBS: ${QUOTA_CONCURRENT_JOBS:-2}
       QUOTA_UPLOADS_PER_DAY: ${QUOTA_UPLOADS_PER_DAY:-50}
       QUOTA_STORED_BYTES: ${QUOTA_STORED_BYTES:-5368709120}
       QUOTA_STORED_BYTES_TOTAL: ${QUOTA_STORED_BYTES_TOTAL:-0}
-      OPEN_PATHWAYS_BEHIND_TLS: ${OPEN_PATHWAYS_BEHIND_TLS:-false}
+      PRISM_BEHIND_TLS: ${PRISM_BEHIND_TLS:-false}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:4280}
     ports:
       - "127.0.0.1:4280:4280"
@@ -123,7 +123,7 @@ services:
     environment:
       # Mirror the web container's env. In production these come from
       # Coolify's secrets UI, identical for both apps.
-      OPEN_PATHWAYS_MODE: hosted
+      PRISM_MODE: hosted
       DB_DRIVER: postgres
       DATABASE_URL: postgres://${POSTGRES_USER:-openpathways}:${POSTGRES_PASSWORD:-openpathways}@postgres:5432/${POSTGRES_DB:-openpathways}
       STORAGE_DRIVER: s3

@@ -208,7 +208,7 @@ describe('Phase 2: SARIF reporter', { timeout: 30000 }, () => {
 
     const parsed = JSON.parse(sarifJson);
 
-    expect(parsed.runs[0].tool.driver.name).toBe('open-pathways');
+    expect(parsed.runs[0].tool.driver.name).toBe('prism');
   });
 
   it('should map violations to SARIF results with correct properties', async () => {

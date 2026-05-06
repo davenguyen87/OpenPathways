@@ -2,7 +2,7 @@
 node_modules/
 
 # Output / generated
-open-pathways-report/
+prism-report/
 *.scorm-fixed.zip
 *.tgz
 
@@ -34,5 +34,5 @@ coverage/
 
 # v3 — audit deliverables, not source
 engagements/
-open-pathways-report/
+prism-report/
 test-triage-scope.js

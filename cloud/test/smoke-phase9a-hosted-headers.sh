@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Phase 9A smoke test — hosted-mode boot validation + helmet headers.
 #
-# 1. Boot in OPEN_PATHWAYS_MODE=hosted with no SESSION_SECRET — must
+# 1. Boot in PRISM_MODE=hosted with no SESSION_SECRET — must
 #    refuse to start (exit non-zero, error message printed).
-# 2. Boot in OPEN_PATHWAYS_MODE=hosted with SESSION_SECRET set — must boot.
+# 2. Boot in PRISM_MODE=hosted with SESSION_SECRET set — must boot.
 # 3. Curl /api/version with -i and assert these headers are present:
 #      Strict-Transport-Security
 #      X-Frame-Options: DENY
@@ -35,7 +35,7 @@ trap cleanup EXIT INT TERM
 
 # -- 1. refuse-to-start without SESSION_SECRET --
 echo "[refuse] booting hosted mode with no SESSION_SECRET (must exit non-zero)"
-OPEN_PATHWAYS_MODE=hosted \
+PRISM_MODE=hosted \
 SQLITE_PATH="$SQLITE_PATH" \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT_REFUSE" >"$DB_DIR/refuse.log" 2>&1 &
 RPID=$!
@@ -65,12 +65,12 @@ echo "[refuse] ok — exited $RC with SESSION_SECRET error"
 HOSTED_SQLITE="$DB_DIR/hosted.sqlite"
 MAIL_DIR="$DB_DIR/mail"
 echo "[hosted] booting hosted mode with SESSION_SECRET + allowlist + MAIL_CAPTURE_DIR"
-OPEN_PATHWAYS_MODE=hosted \
+PRISM_MODE=hosted \
 SESSION_SECRET="0123456789abcdef0123456789abcdef0123456789abcdef" \
 ALLOWLIST_EMAIL_DOMAINS="example.com" \
 MAIL_CAPTURE_DIR="$MAIL_DIR" \
 SQLITE_PATH="$HOSTED_SQLITE" \
-OPEN_PATHWAYS_RETENTION_DAYS=0 \
+PRISM_RETENTION_DAYS=0 \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT_HOSTED" >>"$SVR_LOG" 2>&1 &
 SVR=$!
 for i in $(seq 1 50); do
@@ -120,7 +120,7 @@ SVR=""
 LOCAL_SQLITE="$DB_DIR/local.sqlite"
 echo "[local] booting default (local) mode"
 SQLITE_PATH="$LOCAL_SQLITE" \
-OPEN_PATHWAYS_RETENTION_DAYS=0 \
+PRISM_RETENTION_DAYS=0 \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT_LOCAL" >>"$SVR_LOG" 2>&1 &
 SVR2=$!
 for i in $(seq 1 50); do

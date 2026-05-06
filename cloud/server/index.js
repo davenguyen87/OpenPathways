@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Open Pathways Cloud — server entry point (Phase 5).
+ * Prism Cloud — server entry point (Phase 5).
  *
  * Forked from /web/server/index.js. The Phase 5 difference vs /web is
  * persistence: jobs survive a server restart. Mode-aware hardening,
@@ -13,7 +13,7 @@
  *   3. init() → applies any un-applied numbered migration files.
  *   4. markInterrupted() → flips orphaned pending/running rows to error.
  *   5. Construct the JobManager with the store; attach the audit() runner.
- *   6. Start the retention worker (no-op when OPEN_PATHWAYS_RETENTION_DAYS=0).
+ *   6. Start the retention worker (no-op when PRISM_RETENTION_DAYS=0).
  *   7. Express app + audit router; bind to 127.0.0.1.
  *   8. SIGINT/SIGTERM → drain JobManager pending writes → close server →
  *      close store.
@@ -41,9 +41,9 @@ const pkg = require('../package.json');
 
 const DEFAULT_PORT = 4280;
 // Bind interface — defaults to 0.0.0.0 so containers + reverse proxies
-// can reach us. Override with OPEN_PATHWAYS_HOST=127.0.0.1 for the
+// can reach us. Override with PRISM_HOST=127.0.0.1 for the
 // loopback-only behavior /web/server/index.js uses.
-const HOST = process.env.OPEN_PATHWAYS_HOST || '0.0.0.0';
+const HOST = process.env.PRISM_HOST || '0.0.0.0';
 
 function parseArgs(argv) {
   const args = { port: null, open: null, help: false, version: false };
@@ -96,9 +96,9 @@ function readNpmConfigFallbacks() {
 }
 
 function printHelp() {
-  console.log(`open-pathways-cloud v${pkg.version}
+  console.log(`prism-cloud v${pkg.version}
 
-Hosted multi-tenant version of the Open Pathways SCORM/AICC accessibility
+Hosted multi-tenant version of the Prism SCORM/AICC accessibility
 auditor. In Phase 5 this runs locally with persistent SQLite-backed jobs.
 
 Usage:
@@ -106,17 +106,17 @@ Usage:
   npm run cloud [-- options]
 
 Options:
-  --port <n>      Port to listen on (default: ${DEFAULT_PORT}, or $OPEN_PATHWAYS_PORT)
+  --port <n>      Port to listen on (default: ${DEFAULT_PORT}, or $PRISM_PORT)
   --no-open       Do not auto-launch a browser
   -v, --version   Print version and exit
   -h, --help      Print this help and exit
 
 Environment:
-  OPEN_PATHWAYS_PORT             Port override (lower priority than --port)
+  PRISM_PORT             Port override (lower priority than --port)
   DB_DRIVER                      'sqlite' (default) or 'postgres'
   SQLITE_PATH                    SQLite file path (default: cloud/.tmp/op.sqlite)
   DATABASE_URL                   Postgres connection string (required when DB_DRIVER=postgres)
-  OPEN_PATHWAYS_RETENTION_DAYS   Retention in days (default: 0 = forever)
+  PRISM_RETENTION_DAYS   Retention in days (default: 0 = forever)
 `);
 }
 
@@ -124,11 +124,11 @@ function resolvePort(flagPort, npmConfigPort) {
   if (Number.isFinite(flagPort)) return flagPort;
   if (Number.isFinite(npmConfigPort)) return npmConfigPort;
 
-  const envPort = process.env.OPEN_PATHWAYS_PORT;
+  const envPort = process.env.PRISM_PORT;
   if (envPort) {
     const parsed = parseInt(envPort, 10);
     if (!Number.isFinite(parsed)) {
-      console.error(`Invalid OPEN_PATHWAYS_PORT: ${envPort}`);
+      console.error(`Invalid PRISM_PORT: ${envPort}`);
       process.exit(2);
     }
     return parsed;
@@ -144,11 +144,11 @@ function resolveOpen(flagOpen, npmConfigOpen) {
 }
 
 function resolveRetentionDays() {
-  const raw = process.env.OPEN_PATHWAYS_RETENTION_DAYS;
+  const raw = process.env.PRISM_RETENTION_DAYS;
   if (raw === undefined || raw === '') return 0;
   const parsed = parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    console.error(`Invalid OPEN_PATHWAYS_RETENTION_DAYS: ${raw}`);
+    console.error(`Invalid PRISM_RETENTION_DAYS: ${raw}`);
     process.exit(2);
   }
   return parsed;
@@ -207,7 +207,7 @@ function createApp({ jobs, config, auth, store, storage }) {
     app.set('trust proxy', 1); // Coolify+Caddy/Traefik sit in front
     csrf = buildCsrf({
       sessionSecret: process.env.SESSION_SECRET,
-      cookieSecure: process.env.OPEN_PATHWAYS_BEHIND_TLS === 'true',
+      cookieSecure: process.env.PRISM_BEHIND_TLS === 'true',
     });
     csrfProtect = csrf.doubleCsrfProtection;
     app.use(attachUser({ auth }));
@@ -258,7 +258,7 @@ function createApp({ jobs, config, auth, store, storage }) {
       allowlist: auth.allowlist || null,
       csrf,
       store,
-      cookieSecure: process.env.OPEN_PATHWAYS_BEHIND_TLS === 'true',
+      cookieSecure: process.env.PRISM_BEHIND_TLS === 'true',
     });
     app.use('/api', authRouter);
   }
@@ -383,7 +383,7 @@ async function main() {
   const app = createApp({ jobs, config, auth: authBundle.auth, store, storage });
   const server = app.listen(port, HOST, () => {
     const url = `http://${HOST}:${port}`;
-    console.log(`Open Pathways Cloud v${pkg.version} listening on ${url}`);
+    console.log(`Prism Cloud v${pkg.version} listening on ${url}`);
     console.log(`(mode=${config.mode}, db=${store.driver()}, storage=${storage.driver()}, retentionDays=${retentionDays})`);
     if (open) {
       launch(url).catch((err) => {
@@ -398,7 +398,7 @@ async function main() {
     if (err.code === 'EADDRINUSE') {
       console.error(
         `Port ${port} is already in use. ` +
-          `Pick another with --port <n> or OPEN_PATHWAYS_PORT=<n>.`
+          `Pick another with --port <n> or PRISM_PORT=<n>.`
       );
       process.exit(1);
     }

@@ -71,12 +71,12 @@ boot_server() {
   local db_dir="$1"; shift
   mkdir -p "$db_dir/mail"
   (
-    export OPEN_PATHWAYS_MODE=hosted
+    export PRISM_MODE=hosted
     export SESSION_SECRET="0123456789abcdef0123456789abcdef0123456789abcdef"
     export ALLOWLIST_EMAIL_DOMAINS="example.com"
     export MAIL_CAPTURE_DIR="$db_dir/mail"
     export SQLITE_PATH="$db_dir/op.sqlite"
-    export OPEN_PATHWAYS_RETENTION_DAYS=0
+    export PRISM_RETENTION_DAYS=0
     for kv in "$@"; do export "$kv"; done
     node "$ROOT/cloud/server/index.js" --no-open --port "$port" >>"$db_dir/server.log" 2>&1 &
     echo $! >"$db_dir/server.pid"

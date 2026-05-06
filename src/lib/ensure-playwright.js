@@ -37,7 +37,7 @@ function ensurePlaywright(options = {}) {
     return {
       ok: false,
       reason:
-        'playwright package is not installed. Run `npm install` in the open-pathways folder to install it, then re-run the audit.',
+        'playwright package is not installed. Run `npm install` in the prism folder to install it, then re-run the audit.',
     };
   }
 

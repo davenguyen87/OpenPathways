@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Open Pathways Cloud — worker process (Phase 9C scaffolding, Phase 10
+ * Prism Cloud — worker process (Phase 9C scaffolding, Phase 10
  * end-to-end).
  *
  * Subscribes to the pg-boss runAudit queue and executes audit() against
@@ -39,7 +39,7 @@ async function main() {
   catch (err) { console.error(err.message); process.exit(2); }
 
   if (!config.isHosted) {
-    console.error('Worker requires OPEN_PATHWAYS_MODE=hosted.');
+    console.error('Worker requires PRISM_MODE=hosted.');
     process.exit(2);
   }
   if ((process.env.WORKER_QUEUE || '').toLowerCase() !== 'pgboss' &&
@@ -59,7 +59,7 @@ async function main() {
     return Number.isFinite(n) && n > 0 ? n : 1;
   })();
 
-  console.log(`Open Pathways Cloud worker (concurrency=${concurrency})`);
+  console.log(`Prism Cloud worker (concurrency=${concurrency})`);
 
   const store = createStore();
   await store.init();

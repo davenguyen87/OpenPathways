@@ -30,14 +30,14 @@ function createAuth({ mode, store }) {
     const allowlist = Allowlist.fromEnv();
     if (allowlist.isEmpty()) {
       throw new Error(
-        'OPEN_PATHWAYS_MODE=hosted requires ALLOWLIST_EMAIL_DOMAINS or ALLOWLIST_EMAILS'
+        'PRISM_MODE=hosted requires ALLOWLIST_EMAIL_DOMAINS or ALLOWLIST_EMAILS'
       );
     }
     // SMTP env required UNLESS MAIL_CAPTURE_DIR is set (test/dev path).
     const captureMode = !!process.env.MAIL_CAPTURE_DIR;
     if (!captureMode && !process.env.SMTP_HOST) {
       throw new Error(
-        'OPEN_PATHWAYS_MODE=hosted requires SMTP_HOST (or MAIL_CAPTURE_DIR for tests)'
+        'PRISM_MODE=hosted requires SMTP_HOST (or MAIL_CAPTURE_DIR for tests)'
       );
     }
     const auth = MagicLinkAuth.fromEnv({ store, allowlist });

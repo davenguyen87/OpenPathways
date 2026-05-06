@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Open Pathways — accessibility audits for learning packages</title>
+  <title>Prism — accessibility audits for learning packages</title>
   <!-- Pre-paint: apply saved theme before first paint to prevent flash.
        Mirrors theme.js logic; kept tiny and inline because it must run
        synchronously before the stylesheet renders. -->
@@ -17,7 +17,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <a href="/" class="brand-link">Open Pathways</a>
+      <a href="/" class="brand-link">Prism</a>
       <span class="brand-tag">SCORM &middot; AICC &middot; cmi5 &middot; xAPI auditor</span>
     </div>
     <div class="topbar-meta" id="topbar-meta">
@@ -96,7 +96,7 @@
             Drop a learning package &mdash; or pick one to audit.
           </h1>
           <p id="idle-sub">
-            Open Pathways audits SCORM, AICC, cmi5, and xAPI <code>.zip</code> files
+            Prism audits SCORM, AICC, cmi5, and xAPI <code>.zip</code> files
             against WCAG&nbsp;2.2 AA. You&rsquo;ll get a scorecard, violations grouped
             by criterion, and a Markdown / JSON / CSV report.
           </p>
@@ -155,7 +155,7 @@
         <ul class="recent-list" id="recent-list"></ul>
         <p class="muted recent-hint">
           Stored on this instance and persisted across restarts. Set
-          <code>OPEN_PATHWAYS_RETENTION_DAYS</code> to control retention
+          <code>PRISM_RETENTION_DAYS</code> to control retention
           (default: keep forever in local mode).
         </p>
       </section>
@@ -264,7 +264,7 @@
   <!-- Footer with consistent help link (WCAG 3.2.6) -->
   <footer class="sitefoot" role="contentinfo">
     <div class="sitefoot-inner">
-      <span class="sitefoot-mark">Open Pathways</span>
+      <span class="sitefoot-mark">Prism</span>
       <ul class="sitefoot-nav">
         <li><a href="/about">About</a></li>
         <li><a href="/privacy">Privacy</a></li>

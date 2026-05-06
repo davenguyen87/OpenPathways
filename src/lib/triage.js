@@ -1,5 +1,5 @@
 /**
- * Triage taxonomy and severity tagger for Open Pathways v3
+ * Triage taxonomy and severity tagger for Prism v3
  *
  * Maps findings to one of five triage categories based on fixer availability
  * and WCAG criterion-specific rules. Each violation receives a deterministic

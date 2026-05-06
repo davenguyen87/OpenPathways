@@ -1,11 +1,11 @@
 {
-  "name": "open-pathways-web",
+  "name": "prism-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Local web UI for the Open Pathways SCORM/AICC accessibility auditor",
+  "description": "Local web UI for the Prism SCORM/AICC accessibility auditor",
   "main": "server/index.js",
   "bin": {
-    "open-pathways-web": "server/index.js"
+    "prism-web": "server/index.js"
   },
   "scripts": {
     "serve": "node server/index.js",

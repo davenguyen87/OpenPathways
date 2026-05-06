@@ -1,8 +1,8 @@
-# Open Pathways
+# Prism
 
 WCAG 2.1 AA + Section 508 accessibility audits for SCORM 1.2, SCORM 2004, AICC, and xAPI/Tin Can packages. Produces brand-matched HTML reports with triage-tagged findings and scope estimates.
 
-v3 transforms Open Pathways from a JSON-generating audit tool into a senior-consultant delivery platform for accessibility assessments scoped for Cornerstone OnDemand consulting engagements.
+v3 transforms Prism from a JSON-generating audit tool into a senior-consultant delivery platform for accessibility assessments scoped for Cornerstone OnDemand consulting engagements.
 
 This README covers the **CLI** (the primary surface). Two adjacent surfaces share the same audit core under `src/`:
 
@@ -33,7 +33,7 @@ Output: per-package reports in `./engagements/SL-2026-0418/<package-name>/` plus
 
 ## Compliance baseline
 
-Open Pathways defaults to **WCAG 2.1 AA + Section 508** compliance, aligned with Cornerstone's published minimum standards for regulated clients (government, healthcare, education, financial services). This is the baseline; WCAG 2.2 remains available as an opt-in upgrade for forward-looking work.
+Prism defaults to **WCAG 2.1 AA + Section 508** compliance, aligned with Cornerstone's published minimum standards for regulated clients (government, healthcare, education, financial services). This is the baseline; WCAG 2.2 remains available as an opt-in upgrade for forward-looking work.
 
 ---
 
@@ -109,7 +109,7 @@ The rollup report includes:
 | `--format <format>` | Report format (legacy v2 flag) | `md` | `md` or `txt`. Ignored in v3 (HTML is always generated). |
 | `--json` | Output JSON scorecard to stdout only | — | Suppresses spinner and file output. |
 | `--max-violations <n>` | Fail if violation count exceeds threshold | — | For CI gates. |
-| `--output <dir>` | Output directory (legacy v2 flag) | `./open-pathways-report` | Ignored when `--engagement` is set. |
+| `--output <dir>` | Output directory (legacy v2 flag) | `./prism-report` | Ignored when `--engagement` is set. |
 | `--package-type <type>` | Package format: `scorm12`, `scorm2004`, `aicc`, `cmi5`, `xapi`, `auto` | `auto` | Auto-detection is usually correct. |
 | `--timeout-dynamic <ms>` | Timeout per SCO for dynamic checks | `30000` | |
 | `-v, --version` | Print version | — | |
@@ -207,7 +207,7 @@ Default effort ranges per triage category and criterion. Loaded by the scope est
 
 ## Local-first, consent-driven
 
-Open Pathways produces zero outbound network traffic during audit, with two exceptions:
+Prism produces zero outbound network traffic during audit, with two exceptions:
 
 1. **One-time Playwright install** (v2 behavior, unchanged): `npx playwright install chromium` on first run if the binary is missing.
 2. **LLM-assisted findings** (optional, v3-only): only when both `--llm-provider` and `--llm-key-from-env` are set. Defaults to off. Every assisted finding records provenance (provider, model, engagement ID, timestamp) in JSON output.
@@ -257,7 +257,7 @@ node src/cli.js audit course.zip --engagement SL-2026-0418 --fix
 This tool runs locally from source only. No npm publishing, no public adoption.
 
 - **From source**: `node src/cli.js audit <file.zip>`
-- **Global shorthand** (one-time setup): `npm link` from the project folder creates a symlink; then `open-pathways audit <file.zip>` works globally. Code changes take effect immediately — no re-linking needed.
+- **Global shorthand** (one-time setup): `npm link` from the project folder creates a symlink; then `prism audit <file.zip>` works globally. Code changes take effect immediately — no re-linking needed.
 - **Dependencies**: `npm install` pulls all required packages. First run auto-installs Playwright chromium if missing.
 
 Requires Node.js 18+.
@@ -266,7 +266,7 @@ Requires Node.js 18+.
 
 ## Architecture
 
-Open Pathways operates in three layers:
+Prism operates in three layers:
 
 1. **Parser** (`src/parser/`) — Detects SCORM 1.2, SCORM 2004, AICC, cmi5, xAPI manifests and extracts entry points.
 2. **Checks** (`src/checks/`, `src/dynamic-checks/`) — 21 static WCAG criteria plus dynamic browser-based checks (focus order, focus visible, consistent identification, name/role/value, status messages) executed against the live accessibility tree. Powered by axe-core for contrast and semantic analysis.
@@ -279,7 +279,7 @@ The audit engine and dynamic checks are unchanged from v2. The report layer, def
 ## V2 backward compatibility
 
 When `--engagement` is omitted, the CLI falls back to v2 behavior:
-- Output to `./open-pathways-report/` (default or `--output` flag)
+- Output to `./prism-report/` (default or `--output` flag)
 - Default standard is still `wcag21` (flipped from v2's `wcag22`)
 - Single-package mode only; no library rollup
 

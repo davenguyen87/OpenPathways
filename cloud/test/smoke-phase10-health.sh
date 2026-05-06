@@ -33,7 +33,7 @@ trap cleanup EXIT INT TERM
 # ---- 1. local mode ----
 echo "[local] booting on :$PORT_LOCAL"
 SQLITE_PATH="$DB_DIR/local.sqlite" \
-OPEN_PATHWAYS_RETENTION_DAYS=0 \
+PRISM_RETENTION_DAYS=0 \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT_LOCAL" >>"$SVR_LOG" 2>&1 &
 SVR1=$!
 for i in $(seq 1 50); do
@@ -79,12 +79,12 @@ SVR1=""
 
 # ---- 2. hosted mode ----
 echo "[hosted] booting on :$PORT_HOSTED"
-OPEN_PATHWAYS_MODE=hosted \
+PRISM_MODE=hosted \
 SESSION_SECRET="0123456789abcdef0123456789abcdef0123456789abcdef" \
 ALLOWLIST_EMAIL_DOMAINS="example.com" \
 MAIL_CAPTURE_DIR="$DB_DIR/mail" \
 SQLITE_PATH="$DB_DIR/hosted.sqlite" \
-OPEN_PATHWAYS_RETENTION_DAYS=0 \
+PRISM_RETENTION_DAYS=0 \
   node "$ROOT/cloud/server/index.js" --no-open --port "$PORT_HOSTED" >>"$SVR_LOG" 2>&1 &
 SVR2=$!
 for i in $(seq 1 50); do

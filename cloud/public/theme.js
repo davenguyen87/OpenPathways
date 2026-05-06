@@ -1,4 +1,4 @@
-/* Open Pathways — three-state theme toggle (Auto / Light / Dark).
+/* Prism — three-state theme toggle (Auto / Light / Dark).
    Self-contained, no dependencies. Works on every HTML page that
    includes a #theme-toggle button.
 

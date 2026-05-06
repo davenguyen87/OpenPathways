@@ -1,4 +1,4 @@
-# Open Pathways Cloud — Deploy
+# Prism Cloud — Deploy
 
 End-to-end: how to put this on a real URL via Coolify on a self-hosted VPS.
 
@@ -14,7 +14,7 @@ field listed has a specific value — don't improvise.
 
 **Prerequisites**
 - Coolify installed on an 8 GB / 2–4 vCPU VPS.
-- A domain pointed at the VPS (CNAME `OpenPathways` → coolify-host).
+- A domain pointed at the VPS (CNAME `Prism` → coolify-host).
 - An SMTP provider (Postmark, SES, Mailgun, ...) with credentials ready,
   OR you accept that you'll only test the captured-email path first.
 
@@ -30,14 +30,14 @@ Public Repository** (or private with deploy key). Then:
 - **Build Pack:** `Docker Compose`
 - **Repository root:** Leave blank (uses repo root by default).
 - **Health check path:** `/api/health`
-- **Domain:** `OpenPathways.skill-loop.com` (Coolify provisions Let's Encrypt).
+- **Domain:** `Prism.skill-loop.com` (Coolify provisions Let's Encrypt).
 
 **3. Set environment variables** in Coolify's UI (Application → Environment).
 The `docker-compose.yaml` at repo root references these variables and injects
 them into all four services (web, worker, minio, minio-init):
 
 ```
-PUBLIC_BASE_URL=https://OpenPathways.skill-loop.com
+PUBLIC_BASE_URL=https://Prism.skill-loop.com
 SESSION_SECRET=<output of: openssl rand -hex 32>
 DATABASE_URL=<from step 1>
 S3_ACCESS_KEY=<random alphanumeric, e.g. minioadmin>
@@ -47,8 +47,8 @@ SMTP_HOST=smtp.postmarkapp.com
 SMTP_PORT=587
 SMTP_USER=<your SMTP user>
 SMTP_PASS=<your SMTP password>
-SMTP_FROM=Open Pathways <noreply@skill-loop.com>
-OPEN_PATHWAYS_RETENTION_DAYS=30
+SMTP_FROM=Prism <noreply@skill-loop.com>
+PRISM_RETENTION_DAYS=30
 QUOTA_CONCURRENT_JOBS=2
 QUOTA_UPLOADS_PER_DAY=50
 QUOTA_STORED_BYTES=5368709120
@@ -70,11 +70,11 @@ Watch the logs; you should see:
 - `worker` logs show `subscribed to pg-boss` once Postgres is reachable.
 
 **5. Verify** in this order:
-- `curl https://OpenPathways.skill-loop.com/api/health` → `{"mode":"hosted","db":"ok","storage":"ok"}` (HTTP 200).
-- `curl -I https://OpenPathways.skill-loop.com` → response includes
+- `curl https://Prism.skill-loop.com/api/health` → `{"mode":"hosted","db":"ok","storage":"ok"}` (HTTP 200).
+- `curl -I https://Prism.skill-loop.com` → response includes
   `Strict-Transport-Security`, `X-Frame-Options: DENY`,
   `Content-Security-Policy`.
-- Visit `https://OpenPathways.skill-loop.com` in a browser; you see the login form.
+- Visit `https://Prism.skill-loop.com` in a browser; you see the login form.
 - Enter an allowlisted email → "Check your email"; the email actually
   arrives (or hits your inbox catcher).
 - Click the link → redirected to `/`, logged in (your email shown top right).
@@ -120,7 +120,7 @@ external: true`). The auto-generated `DATABASE_URL` env var includes the
 internal Coolify hostname.
 
 **Domain & TLS.** In Coolify's application UI, navigate to **Domains** and
-add `OpenPathways.skill-loop.com`. Coolify auto-provisions a Let's Encrypt
+add `Prism.skill-loop.com`. Coolify auto-provisions a Let's Encrypt
 cert. No `docker_compose_domains` field is needed — the web service binds
 to port 80 (Traefik's default), so Coolify routes traffic there
 automatically.
@@ -158,7 +158,7 @@ all four services.
 
 | Var                            | Used by                       | Default                | Notes                                                                                       |
 | ------------------------------ | ----------------------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
-| `PUBLIC_BASE_URL`              | web                           | —                      | e.g. `https://OpenPathways.skill-loop.com`. Used in magic-link emails. **Required.**        |
+| `PUBLIC_BASE_URL`              | web                           | —                      | e.g. `https://Prism.skill-loop.com`. Used in magic-link emails. **Required.**        |
 | `SESSION_SECRET`               | web                           | —                      | Hex, 32+ chars. Generate with `openssl rand -hex 32`. **Required.**                         |
 | `DATABASE_URL`                 | web + worker                  | —                      | Postgres connection string from Coolify. **Required.** Format: `postgres://user:pass@host:5432/db` |
 | `S3_ACCESS_KEY`                | web + worker + minio-init     | —                      | MinIO root user. Can be `minioadmin` or any alphanumeric. **Required.**                     |
@@ -170,17 +170,17 @@ all four services.
 | `SMTP_PORT`                    | web                           | `587`                  | Usually 587 (STARTTLS) or 465 (implicit TLS).                                               |
 | `SMTP_USER`                    | web                           | —                      | SMTP login user (e.g. API key for some providers).                                          |
 | `SMTP_PASS`                    | web                           | —                      | SMTP login password.                                                                        |
-| `SMTP_FROM`                    | web                           | `Open Pathways <noreply@example.com>` | Sender address. Set to a domain you control (should match DKIM/SPF). |
-| `OPEN_PATHWAYS_RETENTION_DAYS` | web                           | `30`                   | Job retention (audit results). Set to `30` in production.                                    |
+| `SMTP_FROM`                    | web                           | `Prism <noreply@example.com>` | Sender address. Set to a domain you control (should match DKIM/SPF). |
+| `PRISM_RETENTION_DAYS` | web                           | `30`                   | Job retention (audit results). Set to `30` in production.                                    |
 | `QUOTA_CONCURRENT_JOBS`        | web                           | `2`                    | Max uploads per user at once. Per-user limit.                                                |
 | `QUOTA_UPLOADS_PER_DAY`        | web                           | `50`                   | Max uploads per user per day. Per-user limit.                                                |
 | `QUOTA_STORED_BYTES`           | web                           | `5368709120` (5 GiB)   | Max bytes per user. Per-user limit.                                                         |
 | `QUOTA_STORED_BYTES_TOTAL`     | web                           | `0` (disabled)         | Bucket-wide cap; triggers eviction of oldest jobs when exceeded.                            |
 
 **Automatically set by the compose file** (no need to override in Coolify):
-- `OPEN_PATHWAYS_MODE=hosted` — hardened multi-tenant mode.
-- `OPEN_PATHWAYS_PORT=80` — web binds to port 80 for Traefik routing.
-- `OPEN_PATHWAYS_BEHIND_TLS=true` — cookies get `Secure` flag.
+- `PRISM_MODE=hosted` — hardened multi-tenant mode.
+- `PRISM_PORT=80` — web binds to port 80 for Traefik routing.
+- `PRISM_BEHIND_TLS=true` — cookies get `Secure` flag.
 - `DB_DRIVER=postgres`, `STORAGE_DRIVER=s3`, `WORKER_QUEUE=pgboss` — required
   in hosted mode.
 - `S3_ENDPOINT=http://minio:9000` — MinIO service reachable within the network.
@@ -240,7 +240,7 @@ deploy key).
 - **Build pack:** Select `Docker Compose` from the dropdown.
 - **Repository root:** Leave blank (defaults to repo root).
 - **Health check path:** `/api/health`
-- **Domains tab:** Add `OpenPathways.skill-loop.com`; Coolify provisions
+- **Domains tab:** Add `Prism.skill-loop.com`; Coolify provisions
   Let's Encrypt TLS automatically.
 
 ### 3. Set environment variables
@@ -251,7 +251,7 @@ injects them into all four services (web, worker, minio, minio-init).
 
 At minimum:
 ```
-PUBLIC_BASE_URL=https://OpenPathways.skill-loop.com
+PUBLIC_BASE_URL=https://Prism.skill-loop.com
 SESSION_SECRET=<output of: openssl rand -hex 32>
 DATABASE_URL=<from Postgres step 1>
 S3_ACCESS_KEY=minioadmin
@@ -261,7 +261,7 @@ SMTP_HOST=<your SMTP provider>
 SMTP_PORT=587
 SMTP_USER=<SMTP user>
 SMTP_PASS=<SMTP password>
-SMTP_FROM=Open Pathways <noreply@skill-loop.com>
+SMTP_FROM=Prism <noreply@skill-loop.com>
 ```
 
 ### 4. Deploy
@@ -281,10 +281,10 @@ worker ... subscribed to pg-boss
 ### 5. Verify DNS + TLS
 
 Once the deploy finishes:
-- Add a CNAME at your DNS provider pointing `OpenPathways` at the Coolify
+- Add a CNAME at your DNS provider pointing `Prism` at the Coolify
   host (the IP or hostname Coolify shows in the UI).
 - Wait 5–10 minutes for DNS propagation and Let's Encrypt issuance.
-- `curl https://OpenPathways.skill-loop.com/api/health` should return HTTP 200
+- `curl https://Prism.skill-loop.com/api/health` should return HTTP 200
   with `{"mode":"hosted","db":"ok","storage":"ok"}`.
 
 ### 6. Backups off-box
@@ -328,9 +328,9 @@ email at `cloud/.tmp/mail/`, upload a fixture, watch the worker process it.
 A short post-deploy checklist. All steps assume the domain is propagated
 and the TLS cert has issued (check Coolify's logs if unsure).
 
-- `curl https://OpenPathways.skill-loop.com/api/health` → HTTP 200 with
+- `curl https://Prism.skill-loop.com/api/health` → HTTP 200 with
   `{ mode: 'hosted', db: 'ok', storage: 'ok' }`.
-- `curl -i https://OpenPathways.skill-loop.com` → response includes
+- `curl -i https://Prism.skill-loop.com` → response includes
   `Strict-Transport-Security`, `X-Frame-Options: DENY`,
   `Content-Security-Policy` headers.
 - Visit the URL in a browser; you see a login form (no auth bypass).
@@ -383,14 +383,14 @@ maps to a specific symptom.
 | Healthcheck 503 with no subsystem errors, or 500 response | Permission or network issue. | Check Coolify → Application → Logs for the full stack trace. Common: web can't reach Postgres or MinIO on their internal network. |
 | Login page loads but form submission returns 400 | CSRF token missing or invalid. | Rare if using fresh browser cookies. Hard-refresh (Ctrl-Shift-R) or clear cookies and retry. If persists, check `SESSION_SECRET` is set and identical across web and worker. |
 | Magic-link email never arrives | SMTP credentials wrong or email test mode enabled. | Verify SMTP creds: host, port, user, pass against your provider's docs. Check provider's SMTP logs. Don't set `MAIL_CAPTURE_DIR` in production (it's for local dev). |
-| Magic-link email arrives but link goes to `localhost` | `PUBLIC_BASE_URL` not set. | Set to `https://OpenPathways.skill-loop.com` in Application → Environment. Past sent emails are stale; have the user request a new link. |
-| Logged in successfully, but every POST (upload, etc.) returns 403 | `OPEN_PATHWAYS_BEHIND_TLS` not properly set. | The compose file bakes in `OPEN_PATHWAYS_BEHIND_TLS=true`. If you see this, cookies may not be sent over HTTPS. Verify Coolify reverse proxy is serving HTTPS (not plain HTTP). |
+| Magic-link email arrives but link goes to `localhost` | `PUBLIC_BASE_URL` not set. | Set to `https://Prism.skill-loop.com` in Application → Environment. Past sent emails are stale; have the user request a new link. |
+| Logged in successfully, but every POST (upload, etc.) returns 403 | `PRISM_BEHIND_TLS` not properly set. | The compose file bakes in `PRISM_BEHIND_TLS=true`. If you see this, cookies may not be sent over HTTPS. Verify Coolify reverse proxy is serving HTTPS (not plain HTTP). |
 | Upload returns 429 immediately | Rate limit or quota hit. | Check which: `QUOTA_CONCURRENT_JOBS` (too many uploads at once), `QUOTA_UPLOADS_PER_DAY` (daily limit), `QUOTA_STORED_BYTES` (per-user storage cap). Increase as needed in Environment. |
 | Upload accepted, status stuck at `pending` forever | Worker not running or not connected to queue. | Coolify → Application → Logs. Check worker service is up and shows `subscribed to pg-boss`. Verify `DATABASE_URL` is set and correct. |
 | Worker boots, then exits immediately | Env var mismatch or Postgres unreachable. | Check Coolify → Application → Logs for the worker service. `DATABASE_URL`, `S3_*`, `SESSION_SECRET` must be set. Worker can't boot if it can't reach Postgres. |
 | Login form rejects every email with 403 | Email not in allowlist. | `ALLOWLIST_EMAIL_DOMAINS=skill-loop.com` allows `user@skill-loop.com`. For multiple domains: `skill-loop.com,example.com`. For specific addresses: `ALLOWLIST_EMAILS=alice@example.com,bob@example.com`. |
 | Login form returns 500 | `SESSION_SECRET` missing or invalid. | Set `SESSION_SECRET=$(openssl rand -hex 32)` locally, paste output into Application → Environment. Must be 32+ hex characters. |
-| TLS cert not issuing, domain not resolving | DNS not propagated, or Coolify's Let's Encrypt failing. | Wait 5–10 minutes for DNS propagation. Check Coolify's Caddy/Traefik logs. Verify CNAME is set at your DNS provider: `OpenPathways CNAME coolify-host-ip-or-hostname`. |
+| TLS cert not issuing, domain not resolving | DNS not propagated, or Coolify's Let's Encrypt failing. | Wait 5–10 minutes for DNS propagation. Check Coolify's Caddy/Traefik logs. Verify CNAME is set at your DNS provider: `Prism CNAME coolify-host-ip-or-hostname`. |
 
 For anything not in this table: `/api/health` is the first thing to
 check. The body tells you which subsystem is unhappy. Then Coolify →

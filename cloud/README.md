@@ -1,6 +1,6 @@
-# Open Pathways — Cloud
+# Prism — Cloud
 
-The hosted, multi-tenant version of the Open Pathways SCORM/AICC accessibility auditor. Same audit core as the local CLI and the local web tool, with persistent storage, magic-link auth, a worker queue, S3-compatible object storage, and a deploy target of Coolify on a self-hosted VPS.
+The hosted, multi-tenant version of the Prism SCORM/AICC accessibility auditor. Same audit core as the local CLI and the local web tool, with persistent storage, magic-link auth, a worker queue, S3-compatible object storage, and a deploy target of Coolify on a self-hosted VPS.
 
 > **Status:** Phases 5–10 shipped. Deployable end-to-end to Coolify (see [`DEPLOY.md`](DEPLOY.md)). `/web` keeps working as the lightweight local single-user reference.
 
@@ -51,7 +51,7 @@ node cloud/server/index.js                          # or: npm run cloud (from pr
 **Local (hosted-mode-lite against external Postgres + S3):**
 
 ```bash
-OPEN_PATHWAYS_MODE=hosted DATABASE_URL=... S3_ENDPOINT=... node cloud/server/index.js
+PRISM_MODE=hosted DATABASE_URL=... S3_ENDPOINT=... node cloud/server/index.js
 ```
 
 **Production (Coolify):** see [`DEPLOY.md`](DEPLOY.md). Uses the root `docker-compose.yaml` (web + worker + minio share a stack; Postgres is a separate Coolify resource).

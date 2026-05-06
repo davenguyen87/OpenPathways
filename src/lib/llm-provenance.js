@@ -1,5 +1,5 @@
 /**
- * LLM Provenance Module for Open Pathways v3.0
+ * LLM Provenance Module for Prism v3.0
  *
  * Gating + provenance recording infrastructure for LLM-assisted findings.
  * v3.0 does NOT make real LLM calls — this is the scaffolding that v3.1+ will

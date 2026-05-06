@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-## Project: Open Pathways
+## Project: Prism
 
 A SCORM 1.2 / SCORM 2004 / AICC / xAPI accessibility auditor scoped for Skill Loop, Cornerstone OnDemand's consulting practice. Audits a `.zip` package against **WCAG 2.1 AA + Section 508** (the firm's published baseline; WCAG 2.2 remains opt-in). Produces a brand-matched HTML report, a Markdown variant, and a JSON scorecard, with triage tagging and consultant-hour scope estimates.
 
@@ -45,7 +45,7 @@ engagements/            ← per-client audit output (gitignored)
 ## Key decisions
 
 - **Standard**: defaults to `wcag21` + Section 508 mapping. `--standard wcag21|wcag22` toggles.
-- **v3 deliverable mode**: `--engagement <id>` is the v3 path. Output lands at `engagements/<id>/<package>/{report.html, report.md, results.json}`. Without `--engagement` the CLI runs in v2 backward-compat mode and writes to `./open-pathways-report/`.
+- **v3 deliverable mode**: `--engagement <id>` is the v3 path. Output lands at `engagements/<id>/<package>/{report.html, report.md, results.json}`. Without `--engagement` the CLI runs in v2 backward-compat mode and writes to `./prism-report/`.
 - **Library mode**: `audit-library <dir>` audits an entire client library and writes a single rollup at `engagements/<id>/_library-rollup.{html,md}`.
 - **Brand**: `config/brand.json` is the source of truth for HTML report colors; `--brand-config <path>` overrides per engagement.
 - **Scope estimates**: `config/effort-calibration.json` defines hour-bands per disposition (auto-fix safe / assisted / author rework / content rework / recommend retire), with per-criterion overrides.
@@ -65,7 +65,7 @@ engagements/            ← per-client audit output (gitignored)
 Not published to npm. Runs locally from source.
 
 - Run directly: `node src/cli.js audit <file.zip> --engagement <id>`
-- For the `open-pathways` shorthand globally on your Mac, `npm link` once from the project folder. The symlink points at the local source, so any code changes take effect immediately.
+- For the `prism` shorthand globally on your Mac, `npm link` once from the project folder. The symlink points at the local source, so any code changes take effect immediately.
 - If a new version adds a dependency, run `npm install` inside the project folder.
 - `npm test` runs the vitest suite. `npm run check-no-network` runs the egress trap.
 - Web: `npm run serve`. Cloud (local mode): `npm run cloud`.

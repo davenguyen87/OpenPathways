@@ -1,4 +1,4 @@
-# Open Pathways Cloud — Dockerfile.
+# Prism Cloud — Dockerfile.
 #
 # Built from the repo root so /src/ and /cloud/ are both in the build
 # context. Two services share this image: the web container and the worker
@@ -46,7 +46,7 @@ USER pwuser
 COPY --chown=pwuser:pwuser --from=builder /app /app
 
 ENV NODE_ENV=production \
-    OPEN_PATHWAYS_PORT=4280
+    PRISM_PORT=4280
 
 EXPOSE 4280
 
@@ -54,7 +54,7 @@ EXPOSE 4280
 # this for routing, and the local Dockerfile uses it for the runtime
 # healthcheck.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+process.env.OPEN_PATHWAYS_PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+process.env.PRISM_PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Default command runs the web server. Override to `node cloud/worker/index.js`
 # for the worker container (see docker-compose.yml).

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Open Pathways Web — server entry point.
+ * Prism Web — server entry point.
  *
  * Local-only Express server that hosts the SPA in ../public and (in later
  * phases) accepts SCORM/AICC zip uploads, runs audit() from ../../src, and
@@ -88,22 +88,22 @@ function readNpmConfigFallbacks() {
 }
 
 function printHelp() {
-  console.log(`open-pathways-web v${pkg.version}
+  console.log(`prism-web v${pkg.version}
 
-Local web UI for the Open Pathways SCORM/AICC accessibility auditor.
+Local web UI for the Prism SCORM/AICC accessibility auditor.
 
 Usage:
   node web/server/index.js [options]
   npm run serve [-- options]
 
 Options:
-  --port <n>      Port to listen on (default: ${DEFAULT_PORT}, or $OPEN_PATHWAYS_PORT)
+  --port <n>      Port to listen on (default: ${DEFAULT_PORT}, or $PRISM_PORT)
   --no-open       Do not auto-launch a browser
   -v, --version   Print version and exit
   -h, --help      Print this help and exit
 
 Environment:
-  OPEN_PATHWAYS_PORT   Port override (lower priority than --port)
+  PRISM_PORT   Port override (lower priority than --port)
 
 Note on npm:
   \`npm run serve --no-open\` works directly (npm forwards it as config).
@@ -118,11 +118,11 @@ function resolvePort(flagPort, npmConfigPort) {
   if (Number.isFinite(flagPort)) return flagPort;
   if (Number.isFinite(npmConfigPort)) return npmConfigPort;
 
-  const envPort = process.env.OPEN_PATHWAYS_PORT;
+  const envPort = process.env.PRISM_PORT;
   if (envPort) {
     const parsed = parseInt(envPort, 10);
     if (!Number.isFinite(parsed)) {
-      console.error(`Invalid OPEN_PATHWAYS_PORT: ${envPort}`);
+      console.error(`Invalid PRISM_PORT: ${envPort}`);
       process.exit(2);
     }
     return parsed;
@@ -192,7 +192,7 @@ function main() {
 
   const server = app.listen(port, HOST, () => {
     const url = `http://${HOST}:${port}`;
-    console.log(`Open Pathways Web v${pkg.version} listening on ${url}`);
+    console.log(`Prism Web v${pkg.version} listening on ${url}`);
     if (open) {
       launch(url).catch((err) => {
         console.warn(`(could not auto-open browser: ${err.message})`);
@@ -206,7 +206,7 @@ function main() {
     if (err.code === 'EADDRINUSE') {
       console.error(
         `Port ${port} is already in use. ` +
-          `Pick another with --port <n> or OPEN_PATHWAYS_PORT=<n>.`
+          `Pick another with --port <n> or PRISM_PORT=<n>.`
       );
       process.exit(1);
     }

@@ -10,7 +10,7 @@
 
 ## Problem statement
 
-Skill Loop is a Cornerstone OnDemand consulting practice on a monthly retainer for regulated clients (government, healthcare, education, financial services). New engagements begin with a kickoff call followed by a written assessment delivered within five business days. Each kickoff includes auditing the client's existing SCORM library — typically 50 to 300 packages of mixed vintage, vendor authorship, and accessibility quality — to scope the remediation work and feed the broader engagement assessment. Today this audit costs two to three days of senior-consultant time and produces a JSON file plus a generic Markdown report that doesn't match the firm's deliverable format. Open Pathways v2 catches the violations correctly; the gap is that the output isn't shaped for the actual workflow.
+Skill Loop is a Cornerstone OnDemand consulting practice on a monthly retainer for regulated clients (government, healthcare, education, financial services). New engagements begin with a kickoff call followed by a written assessment delivered within five business days. Each kickoff includes auditing the client's existing SCORM library — typically 50 to 300 packages of mixed vintage, vendor authorship, and accessibility quality — to scope the remediation work and feed the broader engagement assessment. Today this audit costs two to three days of senior-consultant time and produces a JSON file plus a generic Markdown report that doesn't match the firm's deliverable format. Prism v2 catches the violations correctly; the gap is that the output isn't shaped for the actual workflow.
 
 v3 reshapes the tool around the senior consultant: a brand-matched assessment-ready deliverable, a defensible scope estimate, multi-engagement isolation, and defaults that match the firm's published compliance posture (WCAG 2.1 AA + Section 508). The engine and the dynamic checks shipped in v2 are reused; the report layer and the CLI surface are what changes.
 
@@ -33,7 +33,7 @@ v3 reshapes the tool around the senior consultant: a brand-matched assessment-re
 2. **No external SaaS, web UI, watched-folder service, or hosted dashboard.** All v3 work is CLI. Future productization paths remain explicitly out of scope.
 3. **No customer-facing self-service.** The tool is for skill-loop senior consultants; clients never run it directly.
 4. **No multi-language audit.** English-only. Localization is a separate workstream if/when it appears.
-5. **No replacement for the broader engagement assessment.** Open Pathways generates the accessibility section that drops *into* that document; the document itself remains a consultant deliverable.
+5. **No replacement for the broader engagement assessment.** Prism generates the accessibility section that drops *into* that document; the document itself remains a consultant deliverable.
 6. **No format conversion in v3.** Modernization to cmi5/xAPI for Galaxy is Phase 5, after v3 ships and is in use.
 7. **No WBT (web-based training) export.** Removed from the roadmap; Galaxy is the deployment target.
 
@@ -43,7 +43,7 @@ v3 reshapes the tool around the senior consultant: a brand-matched assessment-re
 
 ### Senior Cornerstone consultant — kickoff scoping (primary)
 
-- As a senior consultant, I want to point Open Pathways at a directory of legacy SCORM packages from a new client and receive a brand-matched HTML assessment within minutes, so that I can deliver the kickoff assessment inside the firm's five-business-day SLA without sacrificing a full day of audit time.
+- As a senior consultant, I want to point Prism at a directory of legacy SCORM packages from a new client and receive a brand-matched HTML assessment within minutes, so that I can deliver the kickoff assessment inside the firm's five-business-day SLA without sacrificing a full day of audit time.
 - As a senior consultant, I want every finding tagged with a triage category and a defensible effort estimate, so that I can scope the engagement in hours and propose a monthly retainer shape grounded in real numbers rather than guesswork.
 - As a senior consultant, I want the report to auto-extract the top three risks in language fit for a regulated-client conversation, so that I can paste them directly into the engagement assessment's "top three risks" section.
 
@@ -120,7 +120,7 @@ axe-core's severity taxonomy (`critical|serious|moderate|minor`) is retained int
 
 #### Library rollup (batch mode)
 
-- New command: `open-pathways audit-library <directory> --engagement <id>`.
+- New command: `prism audit-library <directory> --engagement <id>`.
 - Iterates the directory, audits each `.zip`, produces per-package reports and a single library-level rollup report.
 - Library report includes: package count, distribution across triage tags (counts and percentages), total scope-estimate hours, recommended engagement shape (sentence-only — "three-month engagement, ~22 hours/month"; no pricing), top three risks aggregated across the library.
 
@@ -165,14 +165,14 @@ Modernize remediated SCORM packages to cmi5 targeting Cornerstone Galaxy's LRS. 
 ### Leading indicators (within 30 days of v3.0 ship)
 
 - **Library scoping time**: under 2 hours per kickoff engagement, end-to-end (from package handoff to assessment-ready report). Baseline: 2–3 senior-consultant days.
-- **v3 adoption**: 100% of new-client kickoffs use Open Pathways v3 by the end of Q3 2026.
+- **v3 adoption**: 100% of new-client kickoffs use Prism v3 by the end of Q3 2026.
 - **Cross-engagement isolation**: zero instances of one engagement's content appearing in another engagement's output, verified by namespacing audit on every release.
 
 ### Lagging indicators (within 90 days)
 
 - **Scope-estimate accuracy**: actual remediation hours within ±20% of estimated hours, measured across the first 5+ completed engagements where the tool's estimate was used to scope the contract.
 - **Senior-consultant time-on-tool**: under 30 minutes of consultant attention per audit. Most consultant time goes to reviewing assisted fixes, not running the tool itself.
-- **Repeat work-in-engagement**: clients whose initial library was audited via Open Pathways return for a second remediation pass within the same retainer at higher rates than baseline.
+- **Repeat work-in-engagement**: clients whose initial library was audited via Prism return for a second remediation pass within the same retainer at higher rates than baseline.
 
 ---
 
@@ -205,7 +205,7 @@ Modernize remediated SCORM packages to cmi5 targeting Cornerstone Galaxy's LRS. 
 
 ### Assessment generator
 
-- [ ] `open-pathways audit <package.zip> --engagement <id>` produces an HTML report at `./engagements/<id>/<package-name>/report.html` matching the visual contract in `mockups/assessment-mock-v1.html`.
+- [ ] `prism audit <package.zip> --engagement <id>` produces an HTML report at `./engagements/<id>/<package-name>/report.html` matching the visual contract in `mockups/assessment-mock-v1.html`.
 - [ ] The HTML report includes: cover with engagement metadata, executive summary with the four-stat block, library rollup (single-package mode shows package-only stats), scope recommendation card, top-three-risks (or graceful fallback), findings by severity, per-package detail, 508 mapping table, method and scope note.
 - [ ] Markdown alternative output is generated alongside HTML at `./engagements/<id>/<package-name>/report.md` with the same content structure.
 - [ ] Brand assets load from `config/brand.json`; per-engagement override via `--brand-config <path>`.

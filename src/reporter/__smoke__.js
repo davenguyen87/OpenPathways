@@ -118,8 +118,8 @@ async function smokeTest() {
       }
     }
 
-    if (parsed.tool !== 'open-pathways') {
-      throw new Error(`Expected tool name 'open-pathways', got '${parsed.tool}'`);
+    if (parsed.tool !== 'prism') {
+      throw new Error(`Expected tool name 'prism', got '${parsed.tool}'`);
     }
 
     if (parsed.wcagVersion !== '2.2') {

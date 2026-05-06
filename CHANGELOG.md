@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Renamed**: project renamed from Open Pathways to Prism. Internal-only rename; no functional changes. Package names: `prism` (root), `prism-web`, `prism-cloud`. CLI binary: `prism` (was `open-pathways`); re-run `npm link` from the project folder to refresh the global shorthand.
+- The JSON `tool` field and SARIF `tool.driver.name` now report `"prism"` (was `"open-pathways"`). Any downstream tooling parsing stored reports keyed on the old value will need updating.
+- Default v2-mode output directory renamed from `./open-pathways-report/` to `./prism-report/`. Engagement-mode output paths under `./engagements/<id>/<package>/` are unchanged.
+- Hosted-mode env vars renamed from `OPEN_PATHWAYS_*` to `PRISM_*` (e.g. `PRISM_MODE`, `PRISM_PORT`, `PRISM_RETENTION_DAYS`, `PRISM_BEHIND_TLS`, `PRISM_HOST`). Existing deployments must update their env or compose files before redeploy.
+- Documentation now refers to "accessibility" instead of "a11y" throughout.
+
 ## [3.0.1] - 2026-05-05
 
 ### Added

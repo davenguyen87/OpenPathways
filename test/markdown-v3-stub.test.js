@@ -19,7 +19,7 @@ const stubScorecard = {
   complete: true,
   incompleteReason: null,
   scannedAt: '2026-05-05T14:32:00Z',
-  tool: 'open-pathways',
+  tool: 'prism',
   version: '3.0.0',
   scos: [
     { id: 'sco1', title: 'HIPAA Refresher 2022', packageName: 'hipaa-refresher-2022.zip' },

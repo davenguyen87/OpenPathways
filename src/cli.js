@@ -14,7 +14,7 @@ const ora = require('ora').default;
 const VERSION = '3.0.0';
 
 program
-  .name('open-pathways')
+  .name('prism')
   .version(VERSION, '-v, --version')
   .description('Audit SCORM/AICC packages for WCAG 2.1 AA + Section 508 compliance. Produces brand-matched HTML reports, triage-tagged findings, and scope estimates.');
 
@@ -36,7 +36,7 @@ const auditCmd = program
   .option('--llm-provider <provider>', 'LLM provider for assisted findings (off by default; requires --llm-key-from-env)')
   .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
   .option('--max-violations <n>', 'Maximum violations allowed before failing (default: unlimited)', null)
-  .option('--output <dir>', 'Output directory (deprecated in v3; ignored when --engagement is set)', './open-pathways-report')
+  .option('--output <dir>', 'Output directory (deprecated in v3; ignored when --engagement is set)', './prism-report')
   .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
   .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag21)', 'wcag21')
   .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
@@ -165,7 +165,7 @@ async function auditAction(packagePath, cmdOpts) {
     } else {
       // v2 backward compatibility mode
       if (!isJsonOnly) {
-        console.log(kleur.yellow('⚠ Note: --engagement not specified. Using v2 output mode (./open-pathways-report/). Set --engagement for v3 deliverable mode.'));
+        console.log(kleur.yellow('⚠ Note: --engagement not specified. Using v2 output mode (./prism-report/). Set --engagement for v3 deliverable mode.'));
       }
     }
 

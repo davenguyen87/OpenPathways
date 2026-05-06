@@ -1,10 +1,10 @@
 {
-  "name": "open-pathways",
+  "name": "prism",
   "version": "3.0.0",
   "description": "CLI tool for SCORM/AICC accessibility auditing with WCAG 2.1 AA + Section 508 deliverables, scoped for Cornerstone consultancy engagements",
   "main": "src/index.js",
   "bin": {
-    "open-pathways": "src/cli.js"
+    "prism": "src/cli.js"
   },
   "type": "commonjs",
   "scripts": {
@@ -26,12 +26,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/davenguyen87/OpenPathways.git"
+    "url": "git+https://github.com/davenguyen87/Prism.git"
   },
   "bugs": {
-    "url": "https://github.com/davenguyen87/OpenPathways/issues"
+    "url": "https://github.com/davenguyen87/Prism/issues"
   },
-  "homepage": "https://github.com/davenguyen87/OpenPathways#readme",
+  "homepage": "https://github.com/davenguyen87/Prism#readme",
   "engines": {
     "node": ">=18.0.0"
   },

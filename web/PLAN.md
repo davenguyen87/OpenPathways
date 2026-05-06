@@ -1,4 +1,4 @@
-# Open Pathways Web — Build Plan
+# Prism Web — Build Plan
 
 A local web UI on top of the existing CLI. Drop a SCORM/AICC `.zip` into a browser, watch progress stream in, read the report inline. No path typing, no hunting for output files.
 
@@ -35,7 +35,7 @@ audit() from ../src/index.js     ← reused as a library, not shelled out to
 
 ## Phase 1 — Server skeleton (~½ day)
 
-**Success criteria:** `npm run serve` starts the server, opens the browser to a placeholder page that says "Open Pathways Web — ready" with the current version. `--no-open` skips the launch. `--port 1234` and `OPEN_PATHWAYS_PORT=1234` both work.
+**Success criteria:** `npm run serve` starts the server, opens the browser to a placeholder page that says "Prism Web — ready" with the current version. `--no-open` skips the launch. `--port 1234` and `PRISM_PORT=1234` both work.
 
 Tasks:
 1. `server/index.js` — Express app, bind to `127.0.0.1`, port resolution (flag > env > default 4280), graceful shutdown on SIGINT.
@@ -91,7 +91,7 @@ Tasks:
 2. Persist last-used standard / package-type / browser in `localStorage`.
 3. Empty-state CTA: the "Try a sample" button mentioned in Phase 3, wired to `../test/fixtures/`.
 4. README in `web/` with a screenshot, the launch commands, and the port/no-open flags.
-5. Optional: register `open-pathways-web` bin via `npm link` in `web/` for users who want a global shorthand.
+5. Optional: register `prism-web` bin via `npm link` in `web/` for users who want a global shorthand.
 
 ---
 
