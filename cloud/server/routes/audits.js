@@ -96,175 +96,18 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
   const router = express.Router();
   const upload = makeMulter();
 
-  // Multer instance for /audits/batch — accepts up to 30 files in one
-  // request. Same temp-name strategy as the single-upload route.
-  const batchUpload = makeMulter().array('package', 30);
-
   // ------------------------------------------------------------------
-  // POST /api/audits/batch  (Phase 8)
+  // POST /api/audits/batch  (DELETED in Phase 8)
   //
-  // Multipart upload with 1..N `package` fields. Generates one batchId,
-  // creates one job per file sharing that batchId, returns
-  // { batchId, jobIds }. Per-file options are out of scope (ROADMAP §8) —
-  // every job in a batch uses the same standard / packageType / browser.
+  // Legacy endpoint. Return 410 Gone with migration guidance.
   // ------------------------------------------------------------------
-  router.post('/audits/batch', ...auth, ...csrf, batchUpload, async (req, res) => {
-    const files = Array.isArray(req.files) ? req.files : [];
-    if (files.length === 0) {
-      return res.status(400).json({ error: "Missing form field 'package' (one or more .zip files)" });
-    }
-
-    const opts = {
-      packageType: req.body.packageType || 'auto',
-      standard: req.body.standard || 'wcag22',
-      browser: req.body.browser || 'chromium',
-      timeoutDynamic: req.body.timeoutDynamic
-        ? parseInt(req.body.timeoutDynamic, 10)
-        : 30000,
-    };
-
-    // Phase 9C: enforce quotas against the cumulative batch.
-    if (isHosted && store) {
-      const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
-      const verdict = await quotas.check({
-        store, userId: (req.user && req.user.id) || '__no_user__',
-        addingCount: files.length,
-        addingBytes: totalBytes,
-        config: quotaConfig,
-      });
-      if (!verdict.allowed) {
-        for (const f of files) { try { fs.unlinkSync(f.path); } catch (_) {} }
-        return res.status(429).json({
-          error: `Quota exceeded: ${verdict.reason}`,
-          reason: verdict.reason,
-          limit: verdict.limit,
-          current: verdict.current,
-        });
-      }
-    }
-
-    const batchId = crypto.randomUUID();
-    const jobIds = [];
-    try {
-      for (const file of files) {
-        const safeName = (file.originalname || '').replace(/[\\/]/g, '_').slice(0, 256);
-        const hot = await jobs.create({
-          uploadPath: file.path,
-          options: opts,
-          originalName: safeName || null,
-          batchId,
-          userId: req.user ? req.user.id : null,
-          uploadBytes: file.size || null,
-        });
-        jobIds.push(hot.id);
-      }
-      res.status(201).json({ batchId, jobIds });
-    } catch (err) {
-      res.status(500).json({ error: `Failed to create batch: ${err.message}` });
-    }
-  });
-
-  // ------------------------------------------------------------------
-  // GET /api/batches/:id  (Phase 8) — list of jobs in the batch
-  // ------------------------------------------------------------------
-  router.get('/batches/:id', ...auth, async (req, res) => {
-    try {
-      const list = await jobs.listBatchSnapshots(req.params.id, ownerFilter(req));
-      if (list.length === 0) return res.status(404).json({ error: 'Batch not found' });
-      res.json({ batchId: req.params.id, jobs: list });
-    } catch (err) {
-      res.status(500).json({ error: `Failed to fetch batch: ${err.message}` });
-    }
-  });
-
-  // ------------------------------------------------------------------
-  // GET /api/batches/:id/events  (Phase 8) — multiplexed SSE
-  //
-  // Subscribes to every child job's event stream and forwards envelopes
-  // tagged with the originating jobId. The stream stays open until every
-  // child has reached a terminal state, then closes.
-  // ------------------------------------------------------------------
-  router.get('/batches/:id/events', ...auth, async (req, res) => {
-    let list;
-    try { list = await jobs.listBatchSnapshots(req.params.id, ownerFilter(req)); }
-    catch (err) { return res.status(500).json({ error: `Lookup failed: ${err.message}` }); }
-    if (list.length === 0) return res.status(404).json({ error: 'Batch not found' });
-
-    res.set({
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.flushHeaders();
-
-    const writeEvent = (eventName, payload) => {
-      res.write(`event: ${eventName}\n`);
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    };
-
-    const subs = [];
-    let terminalCount = 0;
-    let closed = false;
-    const closeStream = () => {
-      if (closed) return;
-      closed = true;
-      for (const u of subs) { try { u && u(); } catch (_) {} }
-      try { res.end(); } catch (_) {}
-    };
-
-    const total = list.length;
-    // Initial snapshot so subscribers know the line-up before progress.
-    writeEvent('batch', { batchId: req.params.id, jobs: list });
-
-    const isTerminal = (s) => s === 'done' || s === 'error' || s === 'cancelled';
-
-    for (const snap of list) {
-      // Already-terminal jobs: emit a single envelope, count toward the
-      // terminal counter, no live subscription needed.
-      if (isTerminal(snap.status)) {
-        if (snap.status === 'done') writeEvent('child-done', { jobId: snap.id, summary: snap.summary });
-        else if (snap.status === 'error') writeEvent('child-error', { jobId: snap.id, error: snap.error });
-        else writeEvent('child-cancelled', { jobId: snap.id });
-        terminalCount++;
-        continue;
-      }
-      const u = await jobs.subscribe(snap.id, (ev) => {
-        if (ev && ev.stage === '__done__') {
-          writeEvent('child-done', { jobId: snap.id, summary: ev.summary || {} });
-          terminalCount++;
-          if (terminalCount >= total) closeStream();
-        } else if (ev && ev.stage === '__error__') {
-          writeEvent('child-error', { jobId: snap.id, error: ev.error });
-          terminalCount++;
-          if (terminalCount >= total) closeStream();
-        } else if (ev && ev.stage === '__cancelled__') {
-          writeEvent('child-cancelled', { jobId: snap.id });
-          terminalCount++;
-          if (terminalCount >= total) closeStream();
-        } else {
-          writeEvent('child-progress', { jobId: snap.id, ev });
-        }
-      });
-      subs.push(u);
-    }
-
-    // If every job was already terminal at attach time, close the stream
-    // after delivering all the synthesized envelopes.
-    if (terminalCount >= total) {
-      // Defer one tick so the client receives all initial events before close.
-      setImmediate(closeStream);
-    }
-
-    const heartbeat = setInterval(() => {
-      if (closed) return;
-      res.write(': heartbeat\n\n');
-    }, 15000);
-    heartbeat.unref();
-
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      closeStream();
+  router.post('/audits/batch', ...auth, ...csrf, (_req, res) => {
+    res.status(410).json({
+      error: {
+        code: 'endpoint_removed',
+        message: 'POST /api/audits/batch is no longer available. Use the new bulk audit API: POST /api/batches (create batch) followed by POST /api/batches/:id/files (upload files). See cloud/docs/BULK_AUDIT_PLAN.md.',
+        learnMore: 'https://internal.skillloop.local/audit-bulk-api',
+      },
     });
   });
 

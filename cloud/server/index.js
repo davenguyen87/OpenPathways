@@ -25,6 +25,7 @@ const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const { launch } = require('./lib/launch');
 const { createAuditRouter } = require('./routes/audits');
+const { createBatchRouter } = require('./routes/batches');
 const { createAuthRouter } = require('./routes/auth');
 const { createStore } = require('./store');
 const { createStorage } = require('./storage');
@@ -271,6 +272,15 @@ function createApp({ jobs, config, auth, store, storage }) {
     store,
   });
   app.use('/api', auditRouter);
+
+  const { router: batchRouter } = createBatchRouter({
+    jobs,
+    store,
+    config: cfg,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
+  });
+  app.use('/api', batchRouter);
 
   const publicDir = path.join(__dirname, '..', 'public');
   app.use(express.static(publicDir, { extensions: ['html'] }));

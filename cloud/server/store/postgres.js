@@ -408,6 +408,109 @@ class PostgresStore {
     }
   }
 
+  // --------------------------------------------------------------------
+  // Batch operations (Phase 8)
+  // --------------------------------------------------------------------
+
+  async createBatch({ id, userId, engagementId, label, status, createdAt }) {
+    await this.pool.query(
+      `INSERT INTO batches (id, user_id, engagement_id, label, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, userId || null, engagementId, label || null, status, new Date(createdAt)]
+    );
+  }
+
+  /**
+   * Fetch a batch by ID with all its jobs joined in.
+   * @param {string} id - batch ID
+   * @param {object} [filter] - { userId } to enforce ownership; undefined = no filter.
+   * @returns batch row with joined jobs array, or null if not found / doesn't match filter.
+   */
+  async getBatch(id, filter) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM batches WHERE id = $1`,
+      [id]
+    );
+    if (rows.length === 0) return null;
+    const row = rows[0];
+
+    if (filter && filter.userId !== undefined && row.user_id !== filter.userId) {
+      return null;
+    }
+
+    // Fetch all jobs in this batch
+    const { rows: jobRows } = await this.pool.query(
+      `SELECT * FROM jobs WHERE batch_id = $1 ORDER BY created_at ASC`,
+      [id]
+    );
+
+    return {
+      id: row.id,
+      userId: row.user_id || null,
+      engagementId: row.engagement_id,
+      label: row.label || null,
+      status: row.status,
+      createdAt: tsToMs(row.created_at),
+      completedAt: tsToMs(row.completed_at),
+      error: row.error || null,
+      jobs: jobRows.map(rowToJob),
+    };
+  }
+
+  /**
+   * Create a batch_files row (the idempotency join).
+   * @throws on UNIQUE violation if the (batch_id, sha256, filename) triple already exists.
+   */
+  async createBatchFile({ id, batchId, jobId, filename, sha256, createdAt }) {
+    try {
+      await this.pool.query(
+        `INSERT INTO batch_files (id, batch_id, job_id, filename, sha256, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, batchId, jobId, filename, sha256, new Date(createdAt)]
+      );
+
+      return {
+        id,
+        batchId,
+        jobId,
+        filename,
+        sha256,
+        createdAt,
+      };
+    } catch (err) {
+      if (err.code === '23505') { // unique_violation in postgres
+        const error = new Error(`UNIQUE violation for batch_files (batch_id, sha256, filename)`);
+        error.code = 'UNIQUE_VIOLATION';
+        throw error;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Look up an existing batch_files row by the idempotency key.
+   * @returns row { id, batchId, jobId, filename, sha256, createdAt } or null.
+   */
+  async findBatchFileByIdempotencyKey({ batchId, sha256, filename }) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM batch_files
+       WHERE batch_id = $1 AND sha256 = $2 AND filename = $3`,
+      [batchId, sha256, filename]
+    );
+
+    if (rows.length === 0) return null;
+    const row = rows[0];
+
+    return {
+      id: row.id,
+      batchId: row.batch_id,
+      jobId: row.job_id,
+      filename: row.filename,
+      sha256: row.sha256,
+      createdAt: tsToMs(row.created_at),
+    };
+  }
+
   async ping() {
     await this.pool.query(`SELECT 1`);
   }

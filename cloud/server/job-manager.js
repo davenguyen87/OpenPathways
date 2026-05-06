@@ -51,18 +51,30 @@ class JobManager {
    * @param {object} opts.store - SqliteStore | PostgresStore instance.
    * @param {function} [opts.runner] - (job, emit) => Promise<result>
    * @param {function} [opts.log] - structured logger; defaults to no-op.
+   * @param {number} [opts.concurrency] - max concurrent workers (default: 1, read from WORKER_CONCURRENCY env var).
    */
-  constructor({ store, runner, log } = {}) {
+  constructor({ store, runner, log, concurrency } = {}) {
     if (!store) throw new Error('JobManager: store is required');
     this.store = store;
     this.runner = runner || null;
     this.log = log || (() => {});
 
+    // Bounded worker pool: default 1 to match CLI's serial behavior.
+    // Configurable via WORKER_CONCURRENCY env var or constructor option.
+    const concurrencyFromEnv = process.env.WORKER_CONCURRENCY
+      ? parseInt(process.env.WORKER_CONCURRENCY, 10)
+      : null;
+    this.maxConcurrency = concurrency !== undefined ? concurrency : (concurrencyFromEnv || 1);
+    if (this.maxConcurrency < 1) {
+      throw new Error('JobManager: concurrency must be >= 1');
+    }
+
     /** @type {Map<string, object>} hot cache for active jobs */
     this.hot = new Map();
     /** @type {string[]} FIFO of pending job IDs awaiting their turn */
     this.queue = [];
-    this.activeId = null;
+    /** @type {Set<string>} jobIds currently running */
+    this.running = new Set();
     this.shuttingDown = false;
   }
 
@@ -340,25 +352,48 @@ class JobManager {
   }
 
   // --------------------------------------------------------------------
-  // Runner loop
+  // Runner loop (bounded worker pool)
   // --------------------------------------------------------------------
 
   async _tick() {
-    if (this.activeId) return;
-    const nextId = this.queue.shift();
-    if (!nextId) return;
-    const hot = this.hot.get(nextId);
-    if (!hot) return this._tick();
+    // Try to fill available worker slots from the pending queue.
+    // Keep calling until no more slots available or no more pending jobs.
+    while (this.running.size < this.maxConcurrency && this.queue.length > 0) {
+      const nextId = this.queue.shift();
+      if (!nextId) return;
 
-    this.activeId = hot.id;
-    hot.status = 'running';
-    hot.startedAt = Date.now();
-    try {
-      await this.store.updateJob(hot.id, { status: 'running', startedAt: hot.startedAt });
-    } catch (err) {
-      this.log({ msg: 'failed to mark running', jobId: hot.id, err: err.message });
+      const hot = this.hot.get(nextId);
+      if (!hot) return this._tick(); // shouldn't happen, but recursively continue
+
+      // Mark this job as running and start execution
+      this.running.add(hot.id);
+      hot.status = 'running';
+      hot.startedAt = Date.now();
+
+      try {
+        await this.store.updateJob(hot.id, { status: 'running', startedAt: hot.startedAt });
+      } catch (err) {
+        this.log({ msg: 'failed to mark running', jobId: hot.id, err: err.message });
+      }
+
+      // Launch the worker asynchronously (fire-and-forget from this microtask).
+      // Each worker gets its own async execution context. Errors are caught in the worker.
+      this._runWorker(hot).catch((err) => {
+        // Failsafe: if _runWorker throws uncaught, log and clean up.
+        this.log({ msg: 'worker crashed', jobId: hot.id, err: err && err.message });
+        this.running.delete(hot.id);
+        queueMicrotask(() => this._tick());
+      });
     }
+  }
 
+  /**
+   * Execute a single job in a worker context.
+   * Called asynchronously by _tick. Handles the entire job lifecycle:
+   * success, error, and cancellation. Removes itself from running set
+   * when done and triggers _tick to pick up the next pending job.
+   */
+  async _runWorker(hot) {
     try {
       const result = await this.runner(hot, (ev) => {
         if (hot.status === 'cancelled') return; // user moved on
@@ -366,7 +401,7 @@ class JobManager {
       });
 
       if (hot.status === 'cancelled') {
-        // already terminal
+        // already terminal (user cancelled while this worker was running)
       } else {
         hot.result = result;
         hot.status = 'done';
@@ -437,7 +472,8 @@ class JobManager {
         hot.subscribers.clear();
       }
     } finally {
-      this.activeId = null;
+      // Worker finished. Remove from running set and try to schedule the next job.
+      this.running.delete(hot.id);
       queueMicrotask(() => this._tick());
     }
   }
