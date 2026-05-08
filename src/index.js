@@ -381,6 +381,7 @@ async function audit(packagePath, options = {}) {
       incompleteReason: dynamicReport.skipped ? dynamicReport.reason : null,
       scorecard,
       violations: allViolations,
+      entryPoints,
       scos,
       manualReview,
       dynamicReport: {
@@ -430,6 +431,6 @@ function findScoForFile(filePath, scos) {
 
 // Export rebuild from the v4 rebuild module so web/ and cloud/ surfaces
 // can adopt it as a library call without going through the CLI.
-const { rebuild } = require('./rebuild/index');
+const { rebuild, rebuildLibrary } = require('./rebuild/index');
 
-module.exports = { audit, rebuild };
+module.exports = { audit, rebuild, rebuildLibrary };

@@ -13,18 +13,6 @@
  *   run would be needed. The no-network assertion is handled by the separate
  *   npm run check-no-network command.
  *
- * Known gaps (documented, not bugs in this test):
- * - wire-captions-track: The orchestrator (src/rebuild/index.js) does NOT
- *   populate file.siblings when calling fixer.apply(). The wire-captions-track
- *   fixer needs file.siblings (or packageContext.siblings) to locate .vtt files.
- *   Without siblings, the fixer defers all 1.2.2 violations.
- *   TODO follow-up: chunk-01 bug — orchestrator should collect all package files
- *   after unpack and pass them as file.siblings so wire-captions-track fires.
- *   Re-enable captions-wired assertions once chunk-01 is patched.
- *
- * - Library mode (rebuild-library): src/rebuild/index.js does not export a
- *   rebuildLibrary() function. The library rollup is wired in chunk-07 via the
- *   CLI. The library-mode test is marked .skip until chunk-07 lands.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -279,8 +267,9 @@ describe('rebuild-pipeline: rebuild-mixed-violations', () => {
       { criterion: '1.3.1', file: 'page-headings.html', line: 9, message: 'Heading order skipped', snippet: '<h2>Section Title</h2>', triage: 'auto-fix safe' },
       // Heading order (declined — page-headings-declined.html has two <h3>s; peers != 1)
       { criterion: '1.3.1', file: 'page-headings-declined.html', line: 9, message: 'Heading order skipped', snippet: '<h3>Subsection A</h3>', triage: 'auto-fix safe' },
-      // Captions — wire-captions-track WILL defer because orchestrator doesn't populate file.siblings
-      // (see known-gaps comment at top of file). We still include the violation to exercise the deferred path.
+      // Captions — orchestrator now passes packageContext.siblings, so
+      // page-video-with-vtt.html (matching intro.vtt present) gets a
+      // <track> wired, and page-video-no-vtt.html (no lecture.vtt) defers.
       { criterion: '1.2.2', file: 'page-video-with-vtt.html', line: 10, message: 'Video missing captions track', snippet: '<video src="intro.mp4">', triage: 'auto-fix safe' },
       { criterion: '1.2.2', file: 'page-video-no-vtt.html', line: 10, message: 'Video missing captions track', snippet: '<video src="lecture.mp4">', triage: 'auto-fix safe' },
       // Unclaimed criterion — no v4 fixer claims 1.4.4
@@ -328,23 +317,25 @@ describe('rebuild-pipeline: rebuild-mixed-violations', () => {
     expect(unclaimedDeferred[0].reason).toMatch(/no fixer registered/i);
   });
 
-  it('known gap: wire-captions-track defers (orchestrator lacks file.siblings)', () => {
-    // The wire-captions-track fixer requires file.siblings to locate .vtt files.
-    // The orchestrator (chunk 01) does not populate file.siblings when calling
-    // fixer.apply(). Until that is fixed, all 1.2.2 violations from this fixture
-    // will land in deferred (not patches).
-    // TODO follow-up: chunk-01 bug — orchestrator should collect all package files
-    // after unpack and pass them as file.siblings so wire-captions-track fires.
-    const captionsPatches = rebuildResult.manifest.patches.filter(
-      (p) => p.criterion === '1.2.2'
+  it('captions-wired: page-video-with-vtt.html gets a <track> patch', () => {
+    // Orchestrator passes packageContext.siblings so wire-captions-track
+    // can locate intro.vtt next to intro.mp4 in the package.
+    const wired = rebuildResult.manifest.patches.find(
+      (p) => p.criterion === '1.2.2' && p.file === 'page-video-with-vtt.html'
     );
-    const captionsDeferred = rebuildResult.manifest.deferred.filter(
-      (d) => d.criterion === '1.2.2'
+    expect(wired).toBeTruthy();
+    expect(wired.fixer).toBe('wire-captions-track');
+    expect(wired.after).toContain('<track');
+    expect(wired.after).toContain('kind="captions"');
+    expect(wired.after).toContain('intro.vtt');
+  });
+
+  it('captions-deferred: page-video-no-vtt.html defers (no matching .vtt)', () => {
+    const deferred = rebuildResult.manifest.deferred.find(
+      (d) => d.criterion === '1.2.2' && d.file === 'page-video-no-vtt.html'
     );
-    // Either deferred OR patched is acceptable; we're asserting the pipeline
-    // doesn't crash, not that captions are wired. The actual behavior depends
-    // on whether chunk-01 has been patched to populate file.siblings.
-    expect(captionsPatches.length + captionsDeferred.length).toBeGreaterThanOrEqual(0);
+    expect(deferred).toBeTruthy();
+    expect(deferred.reason).toMatch(/no matching \.vtt/i);
   });
 
   it('binary files are intact in rebuilt zip', async () => {
@@ -653,28 +644,26 @@ describe('rebuild-pipeline: PRD v4 acceptance criteria coverage', () => {
 // ─── Test: library mode (deferred — awaiting chunk 07 wiring) ─────────────
 
 describe('rebuild-pipeline: library mode', () => {
-  // The library API is exposed through `rebuildLibraryAction` in
-  // src/lib/rebuild-cli.js. We exercise it here with a stubbed audit (so we
-  // don't need Playwright) and a tmp engagementsRoot. Each per-package
-  // rebuild reuses an existing results.json we plant ahead of time, which
-  // skips the audit() call entirely.
-  const { rebuildLibraryAction } = require('../../src/lib/rebuild-cli.js');
+  // Calls the canonical library API (`rebuildLibrary` exported from
+  // src/rebuild/index.js, re-exported from src/index.js). Pre-plants a
+  // results.json per package so the audit step is skipped, and stubs
+  // verify.js's audit seam so verification doesn't spawn Playwright.
+  const { rebuildLibrary } = require('../../src/rebuild/index.js');
 
   let engagementsRoot;
   let libDir;
+  let libraryResult;
   const ENGAGEMENT = 'test-library';
 
   beforeAll(async () => {
     engagementsRoot = makeTmp('lib-engagements-root');
     libDir = makeTmp('lib-fixtures');
 
-    // Copy the three fixtures into the library directory.
     fs.copyFileSync(FX_DECO, path.join(libDir, path.basename(FX_DECO)));
     fs.copyFileSync(FX_FORM, path.join(libDir, path.basename(FX_FORM)));
     fs.copyFileSync(FX_MIXED, path.join(libDir, path.basename(FX_MIXED)));
 
-    // Pre-plant minimal results.json + audit-result mtime so rebuildAction's
-    // audit-reuse path fires (avoids triggering the real audit + Playwright).
+    // Pre-plant a results.json per package so rebuildLibrary reuses it.
     for (const zipPath of [FX_DECO, FX_FORM, FX_MIXED]) {
       const pkgBase = path.basename(zipPath, '.zip');
       const pkgDir = path.join(engagementsRoot, ENGAGEMENT, pkgBase);
@@ -687,55 +676,43 @@ describe('rebuild-pipeline: library mode', () => {
         JSON.stringify(synthetic),
         'utf8'
       );
-      // Ensure results.json mtime is newer than the input zip mtime so
-      // rebuildAction reuses it without invoking audit().
       const future = new Date(Date.now() + 60_000);
       fs.utimesSync(path.join(pkgDir, 'results.json'), future, future);
     }
 
-    // Stub verify.js's audit seam so the verification step doesn't invoke
-    // Playwright either. The stub returns a small, internally-consistent
-    // audit result.
     __setAuditForTest(async () => ({
       violations: [],
       scorecard: { failedCriteria: 0, criteriaResults: [] }
     }));
 
-    // Run the action against the library directory.
-    let exitCode = null;
-    await rebuildLibraryAction(
-      libDir,
-      {
-        engagement: ENGAGEMENT,
-        mode: 'safe',
-        standard: 'wcag22',
-        engagementsRoot
-      },
-      { exit: (c) => { exitCode = c; } }
-    );
-    // Exit code is best-effort; the test asserts artifacts on disk.
-    void exitCode;
+    libraryResult = await rebuildLibrary(libDir, {
+      engagementId: ENGAGEMENT,
+      engagementsRoot,
+      mode: 'safe',
+      standard: 'wcag22'
+    });
   });
 
   afterAll(() => {
     __setAuditForTest(null);
   });
 
+  it('returns rollup paths and per-package results', () => {
+    expect(libraryResult.results.length).toBe(3);
+    expect(libraryResult.rollupHtmlPath).toMatch(/_rebuild-rollup\.html$/);
+    expect(libraryResult.rollupMdPath).toMatch(/_rebuild-rollup\.md$/);
+  });
+
   it('_rebuild-rollup.html exists at the engagement root', () => {
-    const p = path.join(engagementsRoot, ENGAGEMENT, '_rebuild-rollup.html');
-    expect(fs.existsSync(p)).toBe(true);
+    expect(fs.existsSync(libraryResult.rollupHtmlPath)).toBe(true);
   });
 
   it('_rebuild-rollup.md exists at the engagement root', () => {
-    const p = path.join(engagementsRoot, ENGAGEMENT, '_rebuild-rollup.md');
-    expect(fs.existsSync(p)).toBe(true);
+    expect(fs.existsSync(libraryResult.rollupMdPath)).toBe(true);
   });
 
   it('rollup mentions every package by name', () => {
-    const md = fs.readFileSync(
-      path.join(engagementsRoot, ENGAGEMENT, '_rebuild-rollup.md'),
-      'utf8'
-    );
+    const md = fs.readFileSync(libraryResult.rollupMdPath, 'utf8');
     expect(md).toContain(path.basename(FX_DECO));
     expect(md).toContain(path.basename(FX_FORM));
     expect(md).toContain(path.basename(FX_MIXED));
@@ -748,6 +725,21 @@ describe('rebuild-pipeline: library mode', () => {
       expect(fs.existsSync(path.join(pkgDir, 'rebuild-manifest.json'))).toBe(true);
       expect(fs.existsSync(path.join(pkgDir, 'rebuilt.zip'))).toBe(true);
     }
+  });
+
+  it('totals match the sum of per-package verifications', () => {
+    const summed = libraryResult.results.reduce(
+      (acc, r) => {
+        if (r.verification) {
+          acc.resolved += r.verification.resolved || 0;
+          acc.remaining += r.verification.remaining || 0;
+          acc.introduced += r.verification.introduced || 0;
+        }
+        return acc;
+      },
+      { resolved: 0, remaining: 0, introduced: 0 }
+    );
+    expect(libraryResult.totals).toEqual(summed);
   });
 });
 

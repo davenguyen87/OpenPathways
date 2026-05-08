@@ -365,194 +365,100 @@ describe('rebuildLibraryAction', () => {
 
   it('exits 0 with warning when no .zip files found', async () => {
     const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['readme.txt', 'notes.md']);
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1' }, { exit: exitFn, fsp });
+    const fakeLibrary = vi.fn().mockResolvedValue({
+      results: [],
+      rollupHtmlPath: '/tmp/_rebuild-rollup.html',
+      rollupMdPath: '/tmp/_rebuild-rollup.md',
+      totals: { resolved: 0, remaining: 0, introduced: 0 }
+    });
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
     expect(exitFn).toHaveBeenCalledWith(0);
   });
 
-  it('calls rebuildAction for each zip found', async () => {
+  it('forwards opts and packages to rebuildLibrary', async () => {
     const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['pkg-a.zip', 'pkg-b.zip']);
-
-    const rebuildActionCalls = [];
-    const fakeRebuildAction = vi.fn().mockImplementation(async (zipPath, opts, deps) => {
-      rebuildActionCalls.push(zipPath);
-      // Simulate successful rebuild — write a manifest.
-      const manifestPath = path.join('./engagements/eng-1', path.basename(zipPath, '.zip'), 'rebuild-manifest.json');
-      await deps.fsp.writeFile(manifestPath, JSON.stringify({
-        verification: { resolved: 2, remaining: 0, introduced: 0 },
-      }));
+    const fakeLibrary = vi.fn().mockResolvedValue({
+      results: [
+        { packageName: 'pkg-a.zip', exitCode: 0, verification: { resolved: 1, remaining: 0, introduced: 0 } },
+        { packageName: 'pkg-b.zip', exitCode: 0, verification: { resolved: 1, remaining: 0, introduced: 0 } }
+      ],
+      rollupHtmlPath: '/tmp/_rebuild-rollup.html',
+      rollupMdPath: '/tmp/_rebuild-rollup.md',
+      totals: { resolved: 2, remaining: 0, introduced: 0 }
     });
-
-    // Inject rebuildAction so we don't run real rebuilds.
-    // rebuildLibraryAction calls rebuildAction internally, so we need to
-    // override via deps.rebuildAction. Actually since rebuildLibraryAction
-    // calls rebuildAction directly (closure), we need a different approach.
-    // We inject a custom rebuild + verify + etc. via the deps cascade.
-    const manifest = makeManifest(2, 0);
-    manifest.verification = { resolved: 2, remaining: 0, introduced: 0 };
-    const deps = {
-      exit: exitFn,
-      fsp,
-      audit: vi.fn().mockResolvedValue(makeAuditResults(5)),
-      rebuild: vi.fn().mockResolvedValue({
-        manifest,
-        rebuiltZipPath: '/tmp/rebuilt.zip',
-      }),
-      verify: vi.fn().mockResolvedValue(makeVerifyResult({ remaining: 0 })),
-      renderRebuildDiff: vi.fn().mockResolvedValue('<html>'),
-      renderRebuildSummary: vi.fn().mockResolvedValue('<html>'),
-    };
-
-    // fsp.stat: always throw ENOENT so audit always runs fresh.
-    fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    fsp.readFile = vi.fn().mockImplementation(async (p) => {
-      if (p.endsWith('brand.json')) return JSON.stringify({});
-      // Return a fake manifest for rollup read-back.
-      if (p.endsWith('rebuild-manifest.json')) {
-        return JSON.stringify({ verification: { resolved: 2, remaining: 0, introduced: 0 } });
-      }
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    });
-
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1', mode: 'safe' }, deps);
-
-    // Two zips => rebuild was called twice.
-    expect(deps.rebuild).toHaveBeenCalledTimes(2);
-  });
-
-  it('writes rollup html and md after processing', async () => {
-    const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['pkg-a.zip']);
-    fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    fsp.readFile = vi.fn().mockImplementation(async (p) => {
-      if (p.endsWith('brand.json')) return JSON.stringify({});
-      if (p.endsWith('rebuild-manifest.json')) {
-        return JSON.stringify({ verification: { resolved: 1, remaining: 0, introduced: 0 } });
-      }
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    });
-
-    const manifest = makeManifest(1, 0);
-    manifest.verification = { resolved: 1, remaining: 0, introduced: 0 };
-
-    const deps = {
-      exit: exitFn,
-      fsp,
-      audit: vi.fn().mockResolvedValue(makeAuditResults(1)),
-      rebuild: vi.fn().mockResolvedValue({ manifest, rebuiltZipPath: '/tmp/rebuilt.zip' }),
-      verify: vi.fn().mockResolvedValue(makeVerifyResult({ remaining: 0 })),
-      renderRebuildDiff: vi.fn().mockResolvedValue('<html>'),
-      renderRebuildSummary: vi.fn().mockResolvedValue('<html>'),
-    };
-
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1', mode: 'safe' }, deps);
-
-    const writeFileCalls = fsp.writeFile.mock.calls.map((c) => c[0]);
-    const hasHtml = writeFileCalls.some((p) => p.endsWith('_rebuild-rollup.html'));
-    const hasMd = writeFileCalls.some((p) => p.endsWith('_rebuild-rollup.md'));
-    expect(hasHtml).toBe(true);
-    expect(hasMd).toBe(true);
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1', mode: 'safe', standard: 'wcag22' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
+    expect(fakeLibrary).toHaveBeenCalledTimes(1);
+    const [calledDir, calledOpts] = fakeLibrary.mock.calls[0];
+    expect(calledDir).toBe('/some/dir');
+    expect(calledOpts.engagementId).toBe('eng-1');
+    expect(calledOpts.mode).toBe('safe');
+    expect(calledOpts.standard).toBe('wcag22');
   });
 
   it('exits 0 when all packages have remaining === 0', async () => {
     const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['pkg-a.zip']);
-    fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    fsp.readFile = vi.fn().mockImplementation(async (p) => {
-      if (p.endsWith('brand.json')) return JSON.stringify({});
-      if (p.endsWith('rebuild-manifest.json')) {
-        return JSON.stringify({ verification: { resolved: 2, remaining: 0, introduced: 0 } });
-      }
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const fakeLibrary = vi.fn().mockResolvedValue({
+      results: [{ packageName: 'pkg-a.zip', exitCode: 0, verification: { resolved: 2, remaining: 0, introduced: 0 } }],
+      rollupHtmlPath: '/tmp/_rebuild-rollup.html',
+      rollupMdPath: '/tmp/_rebuild-rollup.md',
+      totals: { resolved: 2, remaining: 0, introduced: 0 }
     });
-
-    const manifest = makeManifest(2, 0);
-    manifest.verification = { resolved: 2, remaining: 0, introduced: 0 };
-
-    const deps = {
-      exit: exitFn,
-      fsp,
-      audit: vi.fn().mockResolvedValue(makeAuditResults(2)),
-      rebuild: vi.fn().mockResolvedValue({ manifest, rebuiltZipPath: '/tmp/rebuilt.zip' }),
-      verify: vi.fn().mockResolvedValue(makeVerifyResult({ remaining: 0 })),
-      renderRebuildDiff: vi.fn().mockResolvedValue('<html>'),
-      renderRebuildSummary: vi.fn().mockResolvedValue('<html>'),
-    };
-
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1', mode: 'safe' }, deps);
-
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1', mode: 'safe' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
     expect(exitFn).toHaveBeenCalledWith(0);
   });
 
   it('exits 1 when any package has remaining > 0 (no error, no regression)', async () => {
     const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['pkg-a.zip']);
-    fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    fsp.readFile = vi.fn().mockImplementation(async (p) => {
-      if (p.endsWith('brand.json')) return JSON.stringify({});
-      if (p.endsWith('rebuild-manifest.json')) {
-        return JSON.stringify({ verification: { resolved: 2, remaining: 3, introduced: 0 } });
-      }
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const fakeLibrary = vi.fn().mockResolvedValue({
+      results: [{ packageName: 'pkg-a.zip', exitCode: 1, verification: { resolved: 2, remaining: 3, introduced: 0 } }],
+      rollupHtmlPath: '/tmp/_rebuild-rollup.html',
+      rollupMdPath: '/tmp/_rebuild-rollup.md',
+      totals: { resolved: 2, remaining: 3, introduced: 0 }
     });
-
-    const manifest = makeManifest(2, 0);
-    manifest.verification = { resolved: 2, remaining: 3, introduced: 0 };
-
-    const deps = {
-      exit: exitFn,
-      fsp,
-      audit: vi.fn().mockResolvedValue(makeAuditResults(5)),
-      rebuild: vi.fn().mockResolvedValue({ manifest, rebuiltZipPath: '/tmp/rebuilt.zip' }),
-      verify: vi.fn().mockResolvedValue(makeVerifyResult({ remaining: 3 })),
-      renderRebuildDiff: vi.fn().mockResolvedValue('<html>'),
-      renderRebuildSummary: vi.fn().mockResolvedValue('<html>'),
-    };
-
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1', mode: 'safe' }, deps);
-
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1', mode: 'safe' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
     expect(exitFn).toHaveBeenCalledWith(1);
   });
 
   it('exits 2 when any package has introduced > 0 (regression)', async () => {
     const exitFn = vi.fn();
-    const fsp = makeFsp();
-    fsp.readdir = vi.fn().mockResolvedValue(['pkg-a.zip']);
-    fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    fsp.readFile = vi.fn().mockImplementation(async (p) => {
-      if (p.endsWith('brand.json')) return JSON.stringify({});
-      if (p.endsWith('rebuild-manifest.json')) {
-        return JSON.stringify({ verification: { resolved: 3, remaining: 0, introduced: 2 } });
-      }
-      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const fakeLibrary = vi.fn().mockResolvedValue({
+      results: [{ packageName: 'pkg-a.zip', exitCode: 2, verification: { resolved: 3, remaining: 0, introduced: 2 } }],
+      rollupHtmlPath: '/tmp/_rebuild-rollup.html',
+      rollupMdPath: '/tmp/_rebuild-rollup.md',
+      totals: { resolved: 3, remaining: 0, introduced: 2 }
     });
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1', mode: 'safe' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
+    expect(exitFn).toHaveBeenCalledWith(2);
+  });
 
-    const manifest = makeManifest(2, 0);
-    manifest.verification = { resolved: 3, remaining: 0, introduced: 2 };
-
-    const deps = {
-      exit: exitFn,
-      fsp,
-      audit: vi.fn().mockResolvedValue(makeAuditResults(5)),
-      rebuild: vi.fn().mockResolvedValue({ manifest, rebuiltZipPath: '/tmp/rebuilt.zip' }),
-      verify: vi.fn().mockResolvedValue(makeVerifyResult({
-        remaining: 0,
-        introduced: 2,
-        hasRegression: true,
-      })),
-      renderRebuildDiff: vi.fn().mockResolvedValue('<html>'),
-      renderRebuildSummary: vi.fn().mockResolvedValue('<html>'),
-    };
-
-    await rebuildLibraryAction('/some/dir', { engagement: 'eng-1', mode: 'safe' }, deps);
-
-    // Exit 2 because regression was introduced.
+  it('exits 2 when rebuildLibrary throws', async () => {
+    const exitFn = vi.fn();
+    const fakeLibrary = vi.fn().mockRejectedValue(new Error('disk on fire'));
+    await rebuildLibraryAction(
+      '/some/dir',
+      { engagement: 'eng-1', mode: 'safe' },
+      { exit: exitFn, rebuildLibrary: fakeLibrary }
+    );
     expect(exitFn).toHaveBeenCalledWith(2);
   });
 });

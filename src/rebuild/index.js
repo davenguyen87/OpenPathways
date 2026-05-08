@@ -428,4 +428,228 @@ async function rebuild(packagePath, auditResults, opts) {
   }
 }
 
-module.exports = { rebuild };
+/**
+ * Library-mode entry: rebuild every `.zip` in `directory`, write per-package
+ * artifacts to `<engagementsRoot>/<engagementId>/<package>/`, and emit a
+ * library-level rollup at `<engagementsRoot>/<engagementId>/_rebuild-rollup.{html,md}`.
+ *
+ * Pure library-shaped: no console output, no spinner, no `process.exit`. The
+ * CLI's `rebuild-library` action wraps this with display + exit logic.
+ *
+ * @param {string} directory
+ * @param {Object} opts
+ * @param {string}   opts.engagementId
+ * @param {string}   [opts.engagementsRoot='./engagements']
+ * @param {'safe'|'assisted'|'full'} [opts.mode='safe']
+ * @param {'wcag21'|'wcag22'}        [opts.standard='wcag22']
+ * @param {Object}   [opts.brandConfig]   - brand object passed to renderers; null OK
+ * @param {string}   [opts.brandConfigPath]
+ * @param {string}   [opts.packageType='auto']
+ * @param {string}   [opts.browser='chromium']
+ * @param {number}   [opts.timeoutDynamic=30000]
+ * @param {AbortSignal} [opts.signal]
+ * @param {Function} [opts.audit]   - audit() override (deps injection for tests)
+ * @param {Function} [opts.verify]  - verify() override (deps injection for tests)
+ * @param {Function} [opts.writeReports] - writeReports override
+ * @param {Function} [opts.renderRebuildDiff]
+ * @param {Function} [opts.renderRebuildSummary]
+ * @returns {Promise<{
+ *   results: Array<{ packageName: string, exitCode: number, verification: Object|null, manifestPath: string|null, rebuiltZipPath: string|null }>,
+ *   rollupHtmlPath: string,
+ *   rollupMdPath: string,
+ *   totals: { resolved: number, remaining: number, introduced: number }
+ * }>}
+ */
+async function rebuildLibrary(directory, opts) {
+  const o = opts || {};
+  if (!o.engagementId) throw new Error('rebuildLibrary: opts.engagementId is required');
+
+  const engagementsRoot = o.engagementsRoot || './engagements';
+  const mode = o.mode || 'safe';
+  const standard = o.standard || 'wcag22';
+  const packageType = o.packageType || 'auto';
+  const browser = o.browser || 'chromium';
+  const timeoutDynamic = typeof o.timeoutDynamic === 'number' ? o.timeoutDynamic : 30000;
+
+  const doAudit = o.audit || require('../index').audit;
+  const doVerify = o.verify || require('./verify').verify;
+  const writeReports = o.writeReports || require('../reporter').writeReports;
+  const renderDiff = o.renderRebuildDiff || require('../reporter/rebuild-diff').renderRebuildDiff;
+  const renderSummary =
+    o.renderRebuildSummary || require('../reporter/rebuild-summary').renderRebuildSummary;
+  const { buildRollupMarkdown, buildRollupHtml } = require('../reporter/rebuild-rollup');
+
+  // Find every .zip in `directory`. Sorted for determinism.
+  const entries = await fsp.readdir(directory);
+  const zipFiles = entries
+    .filter((e) => e.toLowerCase().endsWith('.zip'))
+    .sort()
+    .map((e) => path.resolve(directory, e));
+
+  const engagementDir = path.resolve(engagementsRoot, o.engagementId);
+  await fsp.mkdir(engagementDir, { recursive: true });
+
+  const results = [];
+
+  for (const zipPath of zipFiles) {
+    const packageName = path.basename(zipPath);
+    const packageBaseName = path.basename(zipPath, '.zip');
+    const packageDir = path.join(engagementDir, packageBaseName);
+    await fsp.mkdir(packageDir, { recursive: true });
+
+    let exitCode = 2;
+    let verification = null;
+    let manifestPath = null;
+    let rebuiltZipPath = null;
+
+    try {
+      // 1. Audit (reuse fresh results.json if present).
+      const auditResultsPath = path.join(packageDir, 'results.json');
+      let auditResults = null;
+      try {
+        const [auditStat, inputStat] = await Promise.all([
+          fsp.stat(auditResultsPath),
+          fsp.stat(zipPath)
+        ]);
+        if (auditStat.mtimeMs >= inputStat.mtimeMs) {
+          auditResults = JSON.parse(await fsp.readFile(auditResultsPath, 'utf8'));
+        }
+      } catch (_) {
+        // No existing results.json — fall through to a fresh audit.
+      }
+      if (!auditResults) {
+        auditResults = await doAudit(zipPath, {
+          standard,
+          packageType,
+          browser,
+          timeoutDynamic,
+          packagePath: zipPath
+        });
+        await writeReports({
+          scorecard: auditResults.scorecard,
+          violations: auditResults.violations,
+          manualReview: auditResults.manualReview,
+          scos: auditResults.scos,
+          dynamicReport: auditResults.dynamicReport,
+          fixesApplied: auditResults.fixesApplied,
+          options: {
+            output: packageDir,
+            standard,
+            packageType: auditResults.packageType,
+            packagePath: zipPath,
+            engagementId: o.engagementId,
+            brandConfigPath: o.brandConfigPath
+          }
+        });
+      }
+
+      // 2. Rebuild.
+      const { manifest, rebuiltZipPath: rzPath } = await rebuild(zipPath, auditResults, {
+        mode,
+        standard,
+        engagementId: o.engagementId,
+        packageName,
+        outputDir: packageDir,
+        signal: o.signal
+      });
+
+      // 3. Deferred-tier short-circuit: render summary only, no zip on disk,
+      // empty patches array. Exit 0.
+      if (!rzPath) {
+        const summaryPath = path.join(packageDir, 'rebuild-summary.html');
+        await renderSummary(manifest, o.brandConfig || null, summaryPath);
+        const fakeManifestPath = path.join(packageDir, 'rebuild-manifest.json');
+        await fsp.writeFile(
+          fakeManifestPath,
+          JSON.stringify(manifest, null, 2),
+          'utf8'
+        );
+        results.push({
+          packageName,
+          exitCode: 0,
+          verification: null,
+          manifestPath: fakeManifestPath,
+          rebuiltZipPath: null
+        });
+        continue;
+      }
+
+      // 4. Verify (explicit allowlist — keeps `fix:true` etc. from leaking).
+      const verifyResult = await doVerify(rzPath, auditResults, {
+        standard,
+        packageType,
+        browser,
+        timeoutDynamic,
+        signal: o.signal || null
+      });
+      manifest.verification = {
+        before: verifyResult.before,
+        after: verifyResult.after,
+        resolved: verifyResult.resolved,
+        introduced: verifyResult.introduced,
+        remaining: verifyResult.remaining
+      };
+      verification = manifest.verification;
+
+      // 5. Write artifacts.
+      manifestPath = path.join(packageDir, 'rebuild-manifest.json');
+      const diffPath = path.join(packageDir, 'rebuild-diff.html');
+      const summaryPath = path.join(packageDir, 'rebuild-summary.html');
+      const outputZipPath = path.join(packageDir, 'rebuilt.zip');
+
+      if (verifyResult.hasRegression) {
+        // Regression: write manifest + summary (banner) but NOT rebuilt.zip.
+        await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+        await renderSummary(manifest, o.brandConfig || null, summaryPath);
+        results.push({
+          packageName,
+          exitCode: 2,
+          verification,
+          manifestPath,
+          rebuiltZipPath: null
+        });
+        continue;
+      }
+
+      await fsp.copyFile(rzPath, outputZipPath);
+      rebuiltZipPath = outputZipPath;
+      const { writeManifest } = require('./manifest');
+      writeManifest(manifest, manifestPath);
+      await renderDiff(manifest, o.brandConfig || null, diffPath);
+      await renderSummary(manifest, o.brandConfig || null, summaryPath);
+
+      exitCode = verifyResult.remaining === 0 ? 0 : 1;
+    } catch (_err) {
+      // Per-package error: surface as exitCode=2 in the rollup but keep going.
+      exitCode = 2;
+    }
+
+    results.push({
+      packageName,
+      exitCode,
+      verification,
+      manifestPath,
+      rebuiltZipPath
+    });
+  }
+
+  // Render rollup.
+  const rollupHtmlPath = path.join(engagementDir, '_rebuild-rollup.html');
+  const rollupMdPath = path.join(engagementDir, '_rebuild-rollup.md');
+  await fsp.writeFile(rollupHtmlPath, buildRollupHtml(o.engagementId, results), 'utf8');
+  await fsp.writeFile(rollupMdPath, buildRollupMarkdown(o.engagementId, results), 'utf8');
+
+  // Aggregate totals.
+  const totals = { resolved: 0, remaining: 0, introduced: 0 };
+  for (const r of results) {
+    if (r.verification) {
+      totals.resolved += r.verification.resolved || 0;
+      totals.remaining += r.verification.remaining || 0;
+      totals.introduced += r.verification.introduced || 0;
+    }
+  }
+
+  return { results, rollupHtmlPath, rollupMdPath, totals };
+}
+
+module.exports = { rebuild, rebuildLibrary };

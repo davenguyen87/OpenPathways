@@ -24,10 +24,10 @@
  *    import __setAuditForTest from verify.js. Test stubs are injected via
  *    the _deps injectable in the action functions below.
  *
- * 4. LIBRARY ROLLUP PLACEMENT: The rebuild-library rollup renderer lives
- *    inline in this file (not in a separate src/reporter/rebuild-rollup.js).
- *    The rollup is simple enough (a Markdown summary and an HTML wrapper)
- *    that splitting it out would add indirection without benefit.
+ * 4. LIBRARY ROLLUP PLACEMENT: The rollup HTML/MD builders live in
+ *    `src/reporter/rebuild-rollup.js` and are called from
+ *    `src/rebuild/index.js`'s `rebuildLibrary()`. This file is now a thin
+ *    CLI wrapper around `rebuildLibrary` — display + exit code only.
  */
 
 'use strict';
@@ -455,114 +455,65 @@ function registerRebuild(program, deps) {
 async function rebuildLibraryAction(directory, cmdOpts, deps) {
   const d = deps || {};
   const doExit = d.exit || ((code) => process.exit(code));
-  const fsp = d.fsp || fs;
 
   if (!cmdOpts.engagement) {
     console.error(kleur.red('Error: --engagement <id> is required for rebuild-library'));
     return doExit(2);
   }
 
-  const spinner = ora('Scanning directory...').start();
+  const spinner = ora('Running library rebuild...').start();
 
-  let zipFiles;
+  let library;
   try {
-    const entries = await fsp.readdir(directory);
-    zipFiles = entries
-      .filter((e) => e.toLowerCase().endsWith('.zip'))
-      .map((e) => path.resolve(directory, e));
+    const rebuildLibrary = d.rebuildLibrary || require('../rebuild').rebuildLibrary;
+    library = await rebuildLibrary(directory, {
+      engagementId: cmdOpts.engagement,
+      engagementsRoot: cmdOpts.engagementsRoot || './engagements',
+      mode: cmdOpts.mode || 'safe',
+      standard: cmdOpts.standard || 'wcag22',
+      packageType: cmdOpts.packageType || 'auto',
+      browser: cmdOpts.browser || 'chromium',
+      timeoutDynamic: cmdOpts.timeoutDynamic ? parseInt(cmdOpts.timeoutDynamic, 10) : 30000,
+      brandConfig: await loadBrandConfig(cmdOpts.brandConfig),
+      brandConfigPath: cmdOpts.brandConfig,
+      audit: d.audit,
+      verify: d.verify,
+      writeReports: d.writeReports,
+      renderRebuildDiff: d.renderRebuildDiff,
+      renderRebuildSummary: d.renderRebuildSummary
+    });
   } catch (err) {
     spinner.stop();
-    console.error(kleur.red(`Error reading directory: ${err.message}`));
+    console.error(kleur.red(`Error: ${err.message}`));
     return doExit(2);
   }
 
-  if (zipFiles.length === 0) {
-    spinner.warn('No .zip files found in directory');
-    return doExit(0);
-  }
+  spinner.succeed(`Rebuilt ${library.results.length} package(s)`);
 
-  spinner.succeed(`Found ${zipFiles.length} package(s)`);
-
-  // Results accumulator for rollup.
-  const results = [];
-  let hasToolError = false;
-
-  for (const zipPath of zipFiles) {
-    const pkgName = path.basename(zipPath);
-    console.log(kleur.cyan(`\n→ Rebuilding: ${pkgName}`));
-    let exitCode = null;
-    const fakeExit = (code) => { exitCode = code; };
-
-    // Delegate to the shared rebuildAction with same opts.
-    try {
-      await rebuildAction(zipPath, cmdOpts, { ...d, exit: fakeExit, fsp });
-    } catch (err) {
-      console.error(kleur.red(`  Error rebuilding ${pkgName}: ${err.message}`));
-      exitCode = 2;
+  // Per-package status lines.
+  for (const r of library.results) {
+    const v = r.verification;
+    if (r.exitCode === 2) {
+      console.log(kleur.red(`  ✗ ${r.packageName} — error`));
+    } else if (v && v.remaining === 0) {
+      console.log(kleur.green(`  ✔ ${r.packageName} — clean (resolved ${v.resolved})`));
+    } else if (v) {
+      console.log(
+        kleur.yellow(`  • ${r.packageName} — resolved ${v.resolved}, remaining ${v.remaining}`)
+      );
+    } else {
+      console.log(kleur.gray(`  - ${r.packageName} — deferred mode, no verification`));
     }
-
-    // Read back the manifest to get verification counts.
-    const engagementsRoot = cmdOpts.engagementsRoot || './engagements';
-    const packageBaseName = path.basename(zipPath, '.zip');
-    const packageDir = path.join(engagementsRoot, cmdOpts.engagement, packageBaseName);
-    const manifestPath = path.join(packageDir, 'rebuild-manifest.json');
-
-    let verification = null;
-    try {
-      const raw = await fsp.readFile(manifestPath, 'utf8');
-      const mf = JSON.parse(raw);
-      verification = mf.verification;
-    } catch (_) {
-      // Manifest not written (error case).
-    }
-
-    const result = {
-      packageName: pkgName,
-      exitCode: exitCode !== null ? exitCode : 2,
-      verification,
-    };
-    results.push(result);
-
-    if (exitCode === 2) hasToolError = true;
   }
 
-  // -------------------------------------------------------------------
-  // Render library-level rollup.
-  // Library rollup renderer lives inline here (see module header note).
-  // -------------------------------------------------------------------
-  const engagementsRoot = cmdOpts.engagementsRoot || './engagements';
-  const engagementDir = path.resolve(engagementsRoot, cmdOpts.engagement);
-  await fsp.mkdir(engagementDir, { recursive: true });
+  console.log(`\nLibrary rollup: ${library.rollupHtmlPath}`);
+  console.log(`               ${library.rollupMdPath}`);
 
-  const rollupHtmlPath = path.join(engagementDir, '_rebuild-rollup.html');
-  const rollupMdPath = path.join(engagementDir, '_rebuild-rollup.md');
-
-  const rollupMd = buildRollupMarkdown(cmdOpts.engagement, results);
-  const rollupHtml = buildRollupHtml(cmdOpts.engagement, results);
-
-  await fsp.writeFile(rollupHtmlPath, rollupHtml, 'utf8');
-  await fsp.writeFile(rollupMdPath, rollupMd, 'utf8');
-
-  console.log(`\nLibrary rollup: ${rollupHtmlPath}`);
-  console.log(`               ${rollupMdPath}`);
-
-  // -------------------------------------------------------------------
-  // Exit code: 0 all remaining=0; 1 any remaining>0; 2 on error or introduced>0
-  // -------------------------------------------------------------------
-  const anyIntroduced = results.some(
-    (r) => r.verification && r.verification.introduced > 0
-  );
-  const anyRemaining = results.some(
-    (r) => r.verification && r.verification.remaining > 0
-  );
-
-  if (hasToolError || anyIntroduced) {
-    return doExit(2);
-  } else if (anyRemaining) {
-    return doExit(1);
-  } else {
-    return doExit(0);
-  }
+  // Exit code: 0 all clean; 1 any remaining>0; 2 on tool error or introduced>0.
+  const hasToolError = library.results.some((r) => r.exitCode === 2);
+  if (hasToolError || library.totals.introduced > 0) return doExit(2);
+  if (library.totals.remaining > 0) return doExit(1);
+  return doExit(0);
 }
 
 /**
@@ -592,120 +543,6 @@ function registerRebuildLibrary(program, deps) {
     .action(async (directory, cmdOpts) => {
       await rebuildLibraryAction(directory, cmdOpts, deps);
     });
-}
-
-// ============================================================
-// ROLLUP RENDERERS (inline — see module header note)
-// ============================================================
-
-/**
- * Build a Markdown rollup summary for the rebuild-library command.
- *
- * @param {string} engagementId
- * @param {Array<{packageName: string, exitCode: number, verification: object|null}>} results
- * @returns {string}
- */
-function buildRollupMarkdown(engagementId, results) {
-  const lines = [
-    `# Rebuild rollup — ${engagementId}`,
-    '',
-    `**Packages rebuilt:** ${results.length}`,
-    '',
-    '| Package | Resolved | Remaining | Introduced | Status |',
-    '|---------|----------|-----------|------------|--------|',
-  ];
-
-  let totalResolved = 0;
-  let totalRemaining = 0;
-  let totalIntroduced = 0;
-
-  for (const r of results) {
-    const v = r.verification;
-    const resolved = v ? v.resolved : '—';
-    const remaining = v ? v.remaining : '—';
-    const introduced = v ? v.introduced : '—';
-    const status = r.exitCode === 2 ? 'Error' : (v && v.remaining === 0 ? 'Clean' : 'Remaining');
-
-    if (v) {
-      totalResolved += v.resolved || 0;
-      totalRemaining += v.remaining || 0;
-      totalIntroduced += v.introduced || 0;
-    }
-
-    lines.push(`| ${r.packageName} | ${resolved} | ${remaining} | ${introduced} | ${status} |`);
-  }
-
-  lines.push('', `**Totals:** Resolved: ${totalResolved} | Remaining: ${totalRemaining} | Introduced: ${totalIntroduced}`, '');
-  return lines.join('\n');
-}
-
-/**
- * Build an HTML rollup report for the rebuild-library command.
- * Minimal self-contained HTML; reuses brand colors but keeps it simple.
- *
- * @param {string} engagementId
- * @param {Array<{packageName: string, exitCode: number, verification: object|null}>} results
- * @returns {string}
- */
-function buildRollupHtml(engagementId, results) {
-  const rows = results.map((r) => {
-    const v = r.verification;
-    const resolved = v ? v.resolved : '—';
-    const remaining = v ? v.remaining : '—';
-    const introduced = v != null ? v.introduced : '—';
-    const status = r.exitCode === 2 ? 'Error'
-      : (v && v.remaining === 0 ? 'Clean' : 'Remaining');
-    const statusClass = r.exitCode === 2 ? 'st-error'
-      : (v && v.remaining === 0 ? 'st-clean' : 'st-remaining');
-    const introClass = (v && v.introduced > 0) ? 'st-error' : '';
-    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return [
-      '<tr>',
-      `<td>${esc(r.packageName)}</td>`,
-      `<td>${esc(String(resolved))}</td>`,
-      `<td>${esc(String(remaining))}</td>`,
-      `<td class="${introClass}">${esc(String(introduced))}</td>`,
-      `<td class="${statusClass}">${esc(status)}</td>`,
-      '</tr>'
-    ].join('');
-  }).join('');
-
-  const total = results.length;
-  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  return [
-    '<!DOCTYPE html>',
-    '<html lang="en">',
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width,initial-scale=1">',
-    `<title>${esc(engagementId)} — Rebuild rollup</title>`,
-    '<style>',
-    'body{font-family:system-ui,sans-serif;background:#f3efe6;color:#111633;margin:0;padding:32px 40px}',
-    'h1{font-size:24px;margin-bottom:16px}',
-    'table{width:100%;border-collapse:collapse;border:2px solid #111633;font-size:14px}',
-    'th{background:#111633;color:#f3efe6;padding:8px 12px;text-align:left;font-size:11px;letter-spacing:.1em;text-transform:uppercase}',
-    'td{padding:8px 12px;border-top:1px solid #c8bfa8}',
-    '.st-clean{color:#1b7a3d;font-weight:700}',
-    '.st-error{color:#c46a14;font-weight:700}',
-    '.st-remaining{color:#2a3158}',
-    '</style>',
-    '</head>',
-    '<body>',
-    `<h1>Rebuild rollup — ${esc(engagementId)}</h1>`,
-    `<p>Packages rebuilt: <strong>${total}</strong></p>`,
-    '<table>',
-    '<thead><tr>',
-    '<th>Package</th><th>Resolved</th><th>Remaining</th><th>Introduced</th><th>Status</th>',
-    '</tr></thead>',
-    '<tbody>',
-    rows,
-    '</tbody>',
-    '</table>',
-    '</body>',
-    '</html>',
-    ''
-  ].join('\n');
 }
 
 // ============================================================
