@@ -1,111 +1,105 @@
 /**
- * Add title attribute to <iframe> elements
- * Detects iframes without title and adds a descriptive title attribute
+ * Add title attribute to <iframe> elements.
  */
 
+const { buildPatch, revertPatch, applyMods } = require('../rebuild/types');
+
+const FIXER_ID = 'add-iframe-title';
+const CRITERION = '4.1.2';
+
 module.exports = {
-  id: 'add-iframe-title',
+  id: FIXER_ID,
   name: 'Add title attribute to <iframe>',
   supported: ['scorm12', 'scorm2004', 'aicc', 'xapi', 'cmi5'],
   confidence: 'definitive',
-  criterion: '4.1.2',
+  criterion: CRITERION,
+  triage: 'auto-fix safe',
+  tier: 'safe',
+  provenance: 'deterministic',
 
-  /**
-   * Check if this fixer can repair the violation
-   * @param {object} file - { path, content, isHtml }
-   * @param {object} violation - violation object or null
-   * @returns {boolean} true if we can fix this
-   */
-  canFix(file, violation) {
+  canFix(file /* , violation */) {
     if (!file.isHtml) return false;
 
-    // Scan mode: check for iframes without title
     const iframeRegex = /<iframe[^>]*>/gi;
     let match;
-
     // eslint-disable-next-line no-cond-assign
     while ((match = iframeRegex.exec(file.content)) !== null) {
-      const tag = match[0];
-      // If no title attribute, we can fix it
-      if (!/\stitle\s*=/i.test(tag)) {
-        return true;
-      }
+      if (!/\stitle\s*=/i.test(match[0])) return true;
     }
-
     return false;
   },
 
-  /**
-   * Repair the violation by adding title attribute to iframes
-   * @param {object} file - { path, content, isHtml }
-   * @param {array} violations - violations this fixer can fix
-   * @returns {object} { changed: bool, newContent: string, log: [] }
-   */
-  async fix(file, violations) {
-    let newContent = file.content;
+  async apply(file /* , violations */) {
+    const original = file.content;
     const log = [];
+    const patches = [];
+    const mods = [];
 
-    // Find all iframes without title
     const iframeRegex = /<iframe([^>]*?)>/gi;
     let match;
-    const iframeMatches = [];
 
-    // Collect all matches first to avoid regex state issues
     // eslint-disable-next-line no-cond-assign
-    while ((match = iframeRegex.exec(file.content)) !== null) {
-      iframeMatches.push({
-        fullTag: match[0],
-        attrs: match[1],
-        index: match.index
-      });
-    }
+    while ((match = iframeRegex.exec(original)) !== null) {
+      const fullTag = match[0];
+      const attrs = match[1];
+      if (/\stitle\s*=/i.test(attrs)) continue;
 
-    // Process matches in reverse order to maintain indices
-    for (let i = iframeMatches.length - 1; i >= 0; i--) {
-      const item = iframeMatches[i];
-      const { fullTag, attrs } = item;
-
-      // Skip if already has title
-      if (/\stitle\s*=/i.test(attrs)) {
-        continue;
-      }
-
-      // Extract title from src if possible, otherwise use generic
-      let titleValue = 'Embedded content';
-      const srcMatch = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(attrs);
-      if (srcMatch) {
-        const srcUrl = srcMatch[1];
-        try {
-          // Extract hostname or last path segment
-          if (srcUrl.includes('://')) {
-            // It's an absolute URL
-            const url = new URL(srcUrl);
-            const hostname = url.hostname.replace(/^www\./, '');
-            // Capitalize and make human-readable
-            titleValue = `Embedded ${hostname} content`;
-          } else if (srcUrl.startsWith('/') || srcUrl.includes('.')) {
-            // Relative URL - use last path segment
-            const lastSegment = srcUrl.split('/').pop().split('.')[0];
-            if (lastSegment && lastSegment.length > 0) {
-              titleValue = `Embedded ${lastSegment} content`;
-            }
-          }
-        } catch (err) {
-          // URL parsing failed; use generic title
-          titleValue = 'Embedded content';
-        }
-      }
-
-      // Insert title before closing >
+      const titleValue = computeTitleFromAttrs(attrs);
       const newTag = fullTag.replace(/>\s*$/, ` title="${titleValue}">`);
-      newContent = newContent.replace(fullTag, newTag);
-      log.push(`Added title="${titleValue}" to <iframe> at position ${item.index}`);
+
+      patches.push(
+        buildPatch({
+          fixer: FIXER_ID,
+          criterion: CRITERION,
+          confidence: 'definitive',
+          file: file.path,
+          content: original,
+          originalOffset: match.index,
+          originalText: fullTag,
+          replacementText: newTag,
+          rationale: `<iframe> had no title attribute; injected "${titleValue}" so screen readers announce the embed.`
+        })
+      );
+      mods.push({ offset: match.index, originalText: fullTag, replacementText: newTag });
+      log.push(`Added title="${titleValue}" to <iframe> at position ${match.index}`);
     }
 
     return {
-      changed: log.length > 0,
-      newContent,
+      changed: patches.length > 0,
+      newContent: applyMods(original, mods),
+      patches,
       log
     };
+  },
+
+  async revert(file, patch) {
+    return revertPatch(file, patch);
+  },
+
+  async fix(file, violations) {
+    const result = await this.apply(file, violations);
+    return { changed: result.changed, newContent: result.newContent, log: result.log };
   }
 };
+
+function computeTitleFromAttrs(attrs) {
+  const srcMatch = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(attrs);
+  if (!srcMatch) return 'Embedded content';
+  const srcUrl = srcMatch[1];
+  try {
+    if (srcUrl.includes('://')) {
+      const url = new URL(srcUrl);
+      const hostname = url.hostname.replace(/^www\./, '');
+      return `Embedded ${hostname} content`;
+    }
+    if (srcUrl.startsWith('/') || srcUrl.includes('.')) {
+      const lastSegment = srcUrl.split('/').pop().split('.')[0];
+      if (lastSegment && lastSegment.length > 0) {
+        return `Embedded ${lastSegment} content`;
+      }
+    }
+  } catch (_err) {
+    /* fallthrough to default */
+  }
+  return 'Embedded content';
+}

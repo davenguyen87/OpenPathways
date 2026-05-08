@@ -59,6 +59,17 @@ const auditLibCmd = program
   .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
   .action(auditLibraryAction);
 
+// ============================================================
+// SUBCOMMANDS: rebuild, rebuild-library, rebuild-undo (v4)
+// ============================================================
+// These are registered from src/lib/rebuild-cli.js so they can be
+// unit-tested independently. Passing no deps means production code
+// paths — the action functions require() their dependencies lazily.
+const { registerRebuild, registerRebuildLibrary, registerUndo } = require('./lib/rebuild-cli');
+registerRebuild(program);
+registerRebuildLibrary(program);
+registerUndo(program);
+
 program.parse(process.argv);
 
 // ============================================================

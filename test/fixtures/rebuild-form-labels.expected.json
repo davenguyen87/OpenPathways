@@ -1,0 +1,19 @@
+{
+  "_description": "Minimal SCORM 1.2 package with two fixable label/input pairs (page1 and page2) and one ambiguous case (page3 — two labels and two inputs in one block). associate-form-label should fix the two unambiguous pairs and decline the ambiguous one.",
+  "packageName": "rebuild-form-labels.zip",
+  "violations": {
+    "minCount": 1,
+    "expectedCriteria": ["1.3.1", "3.3.2"]
+  },
+  "rebuild": {
+    "expectedFixers": ["associate-form-label"],
+    "minPatchesApplied": 1,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "notes": [
+    "The associate-form-label fixer pairs <label> with <input> when exactly one of each is present in a parent block with no existing for/id. Page 3 has two labels and two inputs in one block — the fixer declines (ambiguous). Exact resolved count depends on what 1.3.1/3.3.2 static checks emit per page."
+  ]
+}

@@ -1,69 +1,107 @@
 /**
- * Add <title> element when missing or empty
- * Scans all HTML files for missing or blank title tags
+ * Add <title> element when missing or empty.
  */
 
+const { buildPatch, revertPatch, applyMods } = require('../rebuild/types');
+
+const FIXER_ID = 'add-title';
+const CRITERION = '2.4.2';
+const DEFAULT_TITLE = 'Untitled Course';
+
 module.exports = {
-  id: 'add-title',
+  id: FIXER_ID,
   name: 'Add <title> element',
   supported: ['scorm12', 'scorm2004', 'aicc'],
   confidence: 'definitive',
-  criterion: '2.4.2',
+  criterion: CRITERION,
+  triage: 'auto-fix safe',
+  tier: 'safe',
+  provenance: 'deterministic',
 
-  /**
-   * Check if this fixer can repair the violation
-   * When called with a violation, check if it's a missing title issue.
-   * When called with violation=null (scan mode), return true for all HTML files.
-   * @param {object} file - { path, content, isHtml }
-   * @param {object} violation - violation object or null
-   * @returns {boolean} true if we can fix this
-   */
-  canFix(file, violation) {
+  canFix(file /* , violation */) {
     if (!file.isHtml) return false;
 
-    // Look for <title> element
     const titleMatch = file.content.match(/<title[^>]*>(.*?)<\/title>/i);
-
-    // Return true if missing or empty
-    if (!titleMatch) return true; // Missing
-    const titleContent = titleMatch[1].trim();
-    return titleContent.length === 0; // Empty
+    if (!titleMatch) return true;
+    return titleMatch[1].trim().length === 0;
   },
 
-  /**
-   * Repair the violation by adding or filling <title>
-   * @param {object} file - { path, content, isHtml }
-   * @param {array} violations - violations this fixer can fix (may be empty for scan mode)
-   * @returns {object} { changed: bool, newContent: string, log: [] }
-   */
-  async fix(file, violations) {
-    let newContent = file.content;
+  async apply(file /* , violations */) {
+    const original = file.content;
     const log = [];
 
-    // Check for existing <title> element
-    const titleMatch = newContent.match(/<title[^>]*>(.*?)<\/title>/i);
-
+    const titleRegex = /<title[^>]*>(.*?)<\/title>/i;
+    const titleMatch = titleRegex.exec(original);
     if (titleMatch) {
-      // Title exists but is empty; replace it
-      const oldTitle = titleMatch[0];
-      const newTitle = '<title>Untitled Course</title>';
-      newContent = newContent.replace(oldTitle, newTitle);
-      log.push('Replaced empty <title> with "Untitled Course"');
-      return { changed: true, newContent, log };
+      const fullTitle = titleMatch[0];
+      const newTitle = `<title>${DEFAULT_TITLE}</title>`;
+      if (fullTitle === newTitle) {
+        log.push('<title> already populated');
+        return { changed: false, newContent: original, patches: [], log };
+      }
+
+      const patch = buildPatch({
+        fixer: FIXER_ID,
+        criterion: CRITERION,
+        confidence: 'definitive',
+        file: file.path,
+        content: original,
+        originalOffset: titleMatch.index,
+        originalText: fullTitle,
+        replacementText: newTitle,
+        rationale: `<title> was empty; defaulted to "${DEFAULT_TITLE}" so the page exposes a name to assistive tech.`
+      });
+
+      log.push(`Replaced empty <title> with "${DEFAULT_TITLE}"`);
+      return {
+        changed: true,
+        newContent: applyMods(original, [
+          { offset: titleMatch.index, originalText: fullTitle, replacementText: newTitle }
+        ]),
+        patches: [patch],
+        log
+      };
     }
 
-    // Title is missing; need to insert into <head>
-    const headMatch = newContent.match(/<head[^>]*>/i);
+    const headRegex = /<head[^>]*>/i;
+    const headMatch = headRegex.exec(original);
     if (!headMatch) {
       log.push('No <head> tag found; cannot insert <title>');
-      return { changed: false, newContent, log };
+      return { changed: false, newContent: original, patches: [], log };
     }
 
     const headTag = headMatch[0];
-    const newHead = `${headTag}\n  <title>Untitled Course</title>`;
-    newContent = newContent.replace(headTag, newHead);
-    log.push('Inserted <title>Untitled Course</title> into <head>');
+    const newHead = `${headTag}\n  <title>${DEFAULT_TITLE}</title>`;
 
-    return { changed: true, newContent, log };
+    const patch = buildPatch({
+      fixer: FIXER_ID,
+      criterion: CRITERION,
+      confidence: 'definitive',
+      file: file.path,
+      content: original,
+      originalOffset: headMatch.index,
+      originalText: headTag,
+      replacementText: newHead,
+      rationale: `Document had no <title>; inserted "${DEFAULT_TITLE}" inside <head> so the page exposes a name to assistive tech.`
+    });
+
+    log.push(`Inserted <title>${DEFAULT_TITLE}</title> into <head>`);
+    return {
+      changed: true,
+      newContent: applyMods(original, [
+        { offset: headMatch.index, originalText: headTag, replacementText: newHead }
+      ]),
+      patches: [patch],
+      log
+    };
+  },
+
+  async revert(file, patch) {
+    return revertPatch(file, patch);
+  },
+
+  async fix(file, violations) {
+    const result = await this.apply(file, violations);
+    return { changed: result.changed, newContent: result.newContent, log: result.log };
   }
 };

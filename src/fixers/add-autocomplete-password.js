@@ -1,67 +1,71 @@
 /**
- * Add autocomplete="current-password" to password inputs
- * Detects password inputs missing autocomplete attribute
+ * Add autocomplete="current-password" to password inputs.
  */
 
+const { buildPatch, revertPatch, applyMods } = require('../rebuild/types');
+
+const FIXER_ID = 'add-autocomplete-password';
+const CRITERION = '3.3.8';
+
 module.exports = {
-  id: 'add-autocomplete-password',
+  id: FIXER_ID,
   name: 'Add autocomplete="current-password" to password inputs',
   supported: ['scorm12', 'scorm2004', 'aicc'],
   confidence: 'definitive',
-  criterion: '3.3.8',
+  criterion: CRITERION,
+  triage: 'auto-fix safe',
+  tier: 'safe',
+  provenance: 'deterministic',
 
-  /**
-   * Check if this fixer can repair the violation
-   * @param {object} file - { path, content, isHtml }
-   * @param {object} violation - violation object
-   * @returns {boolean} true if we can fix this
-   */
   canFix(file, violation) {
-    if (violation.criterion !== '3.3.8') return false;
+    if (violation === null || violation === undefined) return false;
+    if (violation.criterion !== CRITERION) return false;
     if (!file.isHtml) return false;
 
     const snippet = violation.snippet || '';
-
-    // Look for <input type="password"> without autocomplete
     const isPasswordInput = /type\s*=\s*["']password["']/i.test(snippet);
     const hasAutocomplete = /autocomplete\s*=/i.test(snippet);
-
     return isPasswordInput && !hasAutocomplete;
   },
 
-  /**
-   * Repair the violation by adding autocomplete="current-password"
-   * @param {object} file - { path, content, isHtml }
-   * @param {array} violations - violations this fixer can fix
-   * @returns {object} { changed: bool, newContent: string, log: [] }
-   */
-  async fix(file, violations) {
-    let newContent = file.content;
+  async apply(file, violations) {
     const log = [];
+    const patches = [];
+    const original = file.content;
+    const usedOffsets = new Set();
+    const mods = [];
 
     for (const violation of violations) {
       const snippet = violation.snippet || '';
-
-      // Find <input type="password"> tags
       const inputRegex = /<input\s+([^>]*?type\s*=\s*["']password["'][^>]*)>/gi;
       let match;
       let found = false;
 
       // eslint-disable-next-line no-cond-assign
-      while ((match = inputRegex.exec(newContent)) !== null) {
+      while ((match = inputRegex.exec(original)) !== null) {
+        if (usedOffsets.has(match.index)) continue;
         const fullTag = match[0];
         const attrs = match[1];
+        if (/autocomplete\s*=/i.test(attrs)) continue;
 
-        // Skip if already has autocomplete
-        if (/autocomplete\s*=/i.test(attrs)) {
-          continue;
-        }
-
-        // Check if this matches our snippet
         if (snippet.length === 0 || fullTag.includes(snippet.substring(0, 30))) {
-          // Insert autocomplete before the closing > or />
           const newTag = fullTag.replace(/(\/?)>\s*$/, ' autocomplete="current-password"$1>');
-          newContent = newContent.replace(fullTag, newTag);
+
+          patches.push(
+            buildPatch({
+              fixer: FIXER_ID,
+              criterion: CRITERION,
+              confidence: 'definitive',
+              file: file.path,
+              content: original,
+              originalOffset: match.index,
+              originalText: fullTag,
+              replacementText: newTag,
+              rationale: 'Password input lacked autocomplete; "current-password" lets password managers autofill correctly.'
+            })
+          );
+          mods.push({ offset: match.index, originalText: fullTag, replacementText: newTag });
+          usedOffsets.add(match.index);
           log.push(`Added autocomplete="current-password" to password input at position ${match.index}`);
           found = true;
           break;
@@ -74,9 +78,19 @@ module.exports = {
     }
 
     return {
-      changed: log.length > 0,
-      newContent,
+      changed: patches.length > 0,
+      newContent: applyMods(original, mods),
+      patches,
       log
     };
+  },
+
+  async revert(file, patch) {
+    return revertPatch(file, patch);
+  },
+
+  async fix(file, violations) {
+    const result = await this.apply(file, violations);
+    return { changed: result.changed, newContent: result.newContent, log: result.log };
   }
 };

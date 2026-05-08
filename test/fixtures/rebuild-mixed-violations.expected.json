@@ -1,0 +1,35 @@
+{
+  "_description": "Mixed-violation SCORM 1.2 package exercising the orchestrator's full dispatch path. Contains violations for: decorative images (fixable), heading order (one fixable + one declined), video captions (one wireable + one deferred), and an unclaimed criterion.",
+  "packageName": "rebuild-mixed-violations.zip",
+  "violations": {
+    "minCount": 1,
+    "expectedCriteria": ["1.1.1", "1.3.1", "1.2.2"]
+  },
+  "rebuild": {
+    "expectedFixers": ["add-alt-decorative", "normalize-heading-order", "wire-captions-track"],
+    "minPatchesApplied": 1,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "targetSize": {
+    "_optionChosen": "B",
+    "_rationale": "Option B from the chunk-09 spec. The raise-target-size fixer (chunk 03) requires a boundingBox field on each violation. The static 2.5.8 check (src/checks/2-5-8-target-size-minimum.js) does NOT emit boundingBox — it only emits file, line, snippet, severity, criterion. Because the static check is the only check that would fire on this fixture's HTML content, raise-target-size.canFix() will always return false (no boundingBox), meaning the fixer is staged but effectively dormant for statically-detected findings. v4 ships the fixer ready for v4.1 when the dynamic 2.5.8 check is updated to emit boundingBox. No 2.5.8 violations are seeded in this fixture.",
+    "expectedFixers": [],
+    "notes": "2.5.8 violations are NOT present in this fixture. The raise-target-size fixer is registered in the safe tier but will not fire against static-only findings that lack boundingBox. Re-enable dynamic-check-based assertions once the 2.5.8 dynamic check emits boundingBox."
+  },
+  "headings": {
+    "fixableCase": "page-headings.html — page starts with <h2>, no <h1>. normalize-heading-order detects missing-h1 pattern and promotes the first <h2> to <h1>.",
+    "declinedCase": "page-headings-declined.html — page has two <h3> elements and no h1/h2. normalize-heading-order declines because multiple headings share the first level (peers != 1 check)."
+  },
+  "captions": {
+    "wireable": "page-video-with-vtt.html — <video src='intro.mp4'> with intro.vtt present in the package. wire-captions-track injects <track kind='captions' src='intro.vtt' ...>.",
+    "deferred": "page-video-no-vtt.html — <video src='lecture.mp4'> with no lecture.vtt present. wire-captions-track defers because no matching .vtt is found."
+  },
+  "unclaimed": {
+    "page": "page-unclaimed.html",
+    "criterion": "1.4.4",
+    "notes": "1.4.4 (Resize Text) has no v4 fixer. Any 1.4.4 violation from page-unclaimed.html will land in manifest.deferred with reason matching /no fixer registered/."
+  }
+}

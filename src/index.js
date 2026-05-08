@@ -428,4 +428,8 @@ function findScoForFile(filePath, scos) {
   return null;
 }
 
-module.exports = { audit };
+// Export rebuild from the v4 rebuild module so web/ and cloud/ surfaces
+// can adopt it as a library call without going through the CLI.
+const { rebuild } = require('./rebuild/index');
+
+module.exports = { audit, rebuild };

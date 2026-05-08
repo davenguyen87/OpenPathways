@@ -1,62 +1,74 @@
 /**
- * Add HTML5 DOCTYPE declaration
- * Ensures HTML files start with proper <!DOCTYPE html> for standards mode
+ * Add HTML5 DOCTYPE declaration.
+ * Ensures HTML files start with <!DOCTYPE html> for standards mode.
  */
 
+const { buildPatch, revertPatch, applyMods } = require('../rebuild/types');
+
+const FIXER_ID = 'add-html5-doctype';
+
 module.exports = {
-  id: 'add-html5-doctype',
+  id: FIXER_ID,
   name: 'Add HTML5 DOCTYPE declaration',
   supported: ['scorm12', 'scorm2004', 'aicc', 'xapi', 'cmi5'],
   confidence: 'definitive',
   criterion: '',
+  triage: 'auto-fix safe',
+  tier: 'safe',
+  provenance: 'deterministic',
 
-  /**
-   * Check if this fixer can repair missing DOCTYPE
-   * When violation is provided, return false (no specific violation maps to this).
-   * When violation is null (scan mode), check if file lacks DOCTYPE.
-   * @param {object} file - { path, content, isHtml }
-   * @param {object} violation - violation object or null
-   * @returns {boolean} true if we can fix this
-   */
   canFix(file, violation) {
     if (!file.isHtml) return false;
-
-    // Don't act on specific violations; only scan mode
     if (violation !== null) return false;
 
-    // Check if content starts with DOCTYPE (case-insensitive, after BOM/whitespace)
     const trimmed = file.content.replace(/^﻿/, '').trimStart();
-    const hasDoctype = /^<!doctype\s+html/i.test(trimmed);
-
-    return !hasDoctype;
+    return !/^<!doctype\s+html/i.test(trimmed);
   },
 
-  /**
-   * Repair by prepending HTML5 DOCTYPE
-   * @param {object} file - { path, content, isHtml }
-   * @param {array} violations - violations this fixer can fix (empty in scan mode)
-   * @returns {object} { changed: bool, newContent: string, log: [] }
-   */
-  async fix(file, violations) {
-    let newContent = file.content;
+  async apply(file /* , violations */) {
+    const original = file.content;
     const log = [];
 
-    // Remove any BOM
-    newContent = newContent.replace(/^﻿/, '');
+    const bomLen = original.charCodeAt(0) === 0xFEFF ? 1 : 0;
+    const wsMatch = original.slice(bomLen).match(/^\s*/);
+    const ws = wsMatch ? wsMatch[0] : '';
+    const prefixLen = bomLen + ws.length;
 
-    // Check if DOCTYPE already exists (case-insensitive)
-    const trimmed = newContent.trimStart();
-    if (/^<!doctype\s+html/i.test(trimmed)) {
+    if (/^<!doctype\s+html/i.test(original.slice(prefixLen))) {
       log.push('File already has HTML5 DOCTYPE');
-      return { changed: false, newContent, log };
+      return { changed: false, newContent: original, patches: [], log };
     }
 
-    // Prepend DOCTYPE, preserving any leading whitespace
-    const leadingWhitespace = newContent.match(/^\s*/)[0];
-    const contentAfterWhitespace = newContent.slice(leadingWhitespace.length);
-    newContent = `${leadingWhitespace}<!DOCTYPE html>\n${contentAfterWhitespace}`;
+    const originalPrefix = original.slice(0, prefixLen); // BOM (if any) + leading whitespace
+    const replacementPrefix = `${ws}<!DOCTYPE html>\n`;
+
+    const patch = buildPatch({
+      fixer: FIXER_ID,
+      criterion: '',
+      confidence: 'definitive',
+      file: file.path,
+      content: original,
+      originalOffset: 0,
+      originalText: originalPrefix,
+      replacementText: replacementPrefix,
+      rationale: 'HTML5 DOCTYPE was absent; prepended <!DOCTYPE html> so browsers render in standards mode.'
+    });
+
+    const newContent = applyMods(original, [
+      { offset: 0, originalText: originalPrefix, replacementText: replacementPrefix }
+    ]);
 
     log.push('Prepended HTML5 DOCTYPE');
-    return { changed: true, newContent, log };
+
+    return { changed: true, newContent, patches: [patch], log };
+  },
+
+  async revert(file, patch) {
+    return revertPatch(file, patch);
+  },
+
+  async fix(file, violations) {
+    const result = await this.apply(file, violations);
+    return { changed: result.changed, newContent: result.newContent, log: result.log };
   }
 };

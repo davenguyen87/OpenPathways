@@ -1,81 +1,84 @@
 /**
- * Add alt="" to decorative images
- * Detects clearly decorative images and adds alt="" to silence screen readers
+ * Add alt="" to decorative images.
+ * Detects clearly decorative images and adds alt="" to silence screen readers.
  */
 
+const { buildPatch, revertPatch, applyMods } = require('../rebuild/types');
+
+const FIXER_ID = 'add-alt-decorative';
+const CRITERION = '1.1.1';
+
 module.exports = {
-  id: 'add-alt-decorative',
+  id: FIXER_ID,
   name: 'Add alt="" to decorative images',
   supported: ['scorm12', 'scorm2004', 'aicc'],
   confidence: 'definitive',
-  criterion: '1.1.1',
+  criterion: CRITERION,
+  triage: 'auto-fix safe',
+  tier: 'safe',
+  provenance: 'deterministic',
 
-  /**
-   * Check if this fixer can repair the violation
-   * @param {object} file - { path, content, isHtml }
-   * @param {object} violation - violation object
-   * @returns {boolean} true if we can fix this
-   */
   canFix(file, violation) {
-    if (violation.criterion !== '1.1.1') return false;
+    if (violation === null || violation === undefined) return false;
+    if (violation.criterion !== CRITERION) return false;
     if (!file.isHtml) return false;
 
-    // Look for decorative signals in the violation message or snippet
     const msg = violation.message || '';
     const snippet = violation.snippet || '';
     const combined = `${msg}|${snippet}`.toLowerCase();
 
-    // Check for role="presentation" in the snippet OR message
-    if (/role\s*=\s*["']?presentation["']?/i.test(combined)) {
-      return true;
-    }
-
-    // Check for decorative filename patterns
+    if (/role\s*=\s*["']?presentation["']?/i.test(combined)) return true;
     if (/spacer|divider|bullet|pixel|blank|transparent|icon-small|decoration/i.test(combined)) {
       return true;
     }
-
     return false;
   },
 
-  /**
-   * Repair the violation by adding alt="" to the img tag
-   * @param {object} file - { path, content, isHtml }
-   * @param {array} violations - violations this fixer can fix
-   * @returns {object} { changed: bool, newContent: string, log: [] }
-   */
-  async fix(file, violations) {
-    let newContent = file.content;
+  async apply(file, violations) {
     const log = [];
+    const patches = [];
+    const original = file.content;
+    const usedOffsets = new Set();
+    const mods = [];
 
     for (const violation of violations) {
       const snippet = violation.snippet || '';
-
-      // Find the <img> tag in the content
-      // Look for the exact snippet or a close match
       const imgRegex = /<img\s+([^>]*?)>/gi;
       let match;
       let found = false;
 
       // eslint-disable-next-line no-cond-assign
-      while ((match = imgRegex.exec(newContent)) !== null) {
+      while ((match = imgRegex.exec(original)) !== null) {
+        if (usedOffsets.has(match.index)) continue;
         const fullTag = match[0];
         const attrs = match[1];
+        if (/\salt\s*=/i.test(attrs)) continue;
 
-        // Check if this img already has alt
-        if (/\salt\s*=/i.test(attrs)) {
-          continue; // Skip, already has alt
-        }
-
-        // Check if this matches our snippet or is clearly decorative
         if (
           snippet.includes(fullTag.substring(0, 50)) ||
           /role\s*=\s*["']presentation["']/i.test(attrs) ||
           /spacer|divider|bullet|pixel|blank|transparent|decoration/i.test(attrs)
         ) {
-          // Insert alt="" before the closing >
-          const newTag = fullTag.replace(/>\s*$/, ' alt="" />');
-          newContent = newContent.replace(fullTag, newTag);
+          const newTag = fullTag.replace(/\s*\/?>\s*$/, ' alt="" />');
+          const rationale = /role\s*=\s*["']presentation["']/i.test(attrs)
+            ? 'role="presentation" indicates a decorative image; silenced for screen readers via alt="".'
+            : 'Decorative filename pattern indicates a non-informative image; silenced for screen readers via alt="".';
+
+          patches.push(
+            buildPatch({
+              fixer: FIXER_ID,
+              criterion: CRITERION,
+              confidence: 'definitive',
+              file: file.path,
+              content: original,
+              originalOffset: match.index,
+              originalText: fullTag,
+              replacementText: newTag,
+              rationale
+            })
+          );
+          mods.push({ offset: match.index, originalText: fullTag, replacementText: newTag });
+          usedOffsets.add(match.index);
           log.push(`Added alt="" to <img> at position ${match.index}`);
           found = true;
           break;
@@ -88,9 +91,19 @@ module.exports = {
     }
 
     return {
-      changed: log.length > 0,
-      newContent,
+      changed: patches.length > 0,
+      newContent: applyMods(original, mods),
+      patches,
       log
     };
+  },
+
+  async revert(file, patch) {
+    return revertPatch(file, patch);
+  },
+
+  async fix(file, violations) {
+    const result = await this.apply(file, violations);
+    return { changed: result.changed, newContent: result.newContent, log: result.log };
   }
 };

@@ -1,0 +1,19 @@
+{
+  "_description": "Minimal SCORM 1.2 package with 5 decorative-image violations across two pages. All five should be claimed and applied by the add-alt-decorative fixer.",
+  "packageName": "rebuild-decorative-imgs.zip",
+  "violations": {
+    "minCount": 1,
+    "expectedCriteria": ["1.1.1"]
+  },
+  "rebuild": {
+    "expectedFixers": ["add-alt-decorative"],
+    "minPatchesApplied": 1,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "notes": [
+    "The add-alt-decorative fixer matches on decorative filename patterns (spacer, divider, pixel, blank, icon-small) and role=presentation. The exact count varies by what the static 1.1.1 check detects — we assert resolved > 0 and introduced == 0."
+  ]
+}
