@@ -1,0 +1,28 @@
+{
+  "_description": "SCORM 1.2 with five HTML pages: three div.main wrappers, one role=main div, and one page with two <nav> (one labeled, one not). Targets landmark-insertion (promotes div.main and role=main divs to <main>) and landmark-labeling (adds aria-label to the unlabeled <nav>).",
+  "packageName": "rebuild-landmark-needed.zip",
+  "violations": {
+    "expectedCriteria": [
+      "1.3.1",
+      "4.1.2"
+    ]
+  },
+  "rebuild": {
+    "mode": "full",
+    "expectedTransformers": [
+      "landmark-insertion",
+      "landmark-labeling"
+    ],
+    "expectedTransformFamilies": [
+      "landmark"
+    ],
+    "manifestEdited": false,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "decline": {
+    "reasons": []
+  }
+}

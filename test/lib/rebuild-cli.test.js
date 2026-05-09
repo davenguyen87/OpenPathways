@@ -184,11 +184,91 @@ describe('rebuildAction', () => {
     expect(deps.verify).not.toHaveBeenCalled();
   });
 
-  it('exits 0 for --mode full without rebuilding', async () => {
+  it('--mode full without --no-checkpoint stages output and exits 0 without verifying', async () => {
+    // Commander stores the negated --no-checkpoint as cmdOpts.checkpoint:
+    // true (default) means checkpoint-on. Full mode in checkpoint-on calls
+    // rebuild() with noCheckpoint=false; the orchestrator returns
+    // { manifest, stagedZipPath, stagingDir } and the CLI must NOT call
+    // verify(). It must render preview into the staging directory.
     const deps = makeDeps();
-    await rebuildAction('/path/to/test.zip', { engagement: 'eng-1', mode: 'full' }, deps);
+    deps.fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    deps.rebuild = vi.fn().mockResolvedValue({
+      manifest,
+      stagedZipPath: '/tmp/eng/test/.rebuild-staging/rebuilt-staged.zip',
+      stagingDir: '/tmp/eng/test/.rebuild-staging'
+    });
+    deps.renderRebuildPreview = vi.fn().mockResolvedValue('<html>preview</html>');
+
+    await rebuildAction(
+      '/path/to/test.zip',
+      { engagement: 'eng-1', mode: 'full', checkpoint: true },
+      deps
+    );
+
+    expect(deps.rebuild).toHaveBeenCalled();
+    const rebuildOpts = deps.rebuild.mock.calls[0][2];
+    expect(rebuildOpts.noCheckpoint).toBe(false);
+    expect(rebuildOpts.mode).toBe('full');
+    // No verify in checkpoint mode — that runs at promote() time.
+    expect(deps.verify).not.toHaveBeenCalled();
+    // Preview rendered (best-effort; chunk 06 supplies the renderer).
+    expect(deps.renderRebuildPreview).toHaveBeenCalled();
+    // No final rebuilt.zip copy in checkpoint mode.
+    expect(deps.fsp.copyFile).not.toHaveBeenCalled();
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(deps.rebuild).not.toHaveBeenCalled();
+  });
+
+  it('--mode full --no-checkpoint produces final artifacts directly', async () => {
+    // --no-checkpoint sets cmdOpts.checkpoint to false. The CLI calls
+    // rebuild() with noCheckpoint=true; orchestrator returns the inline
+    // rebuilt zip. CLI verifies, renders diff/summary/preview, exits per
+    // v4 contract.
+    const deps = makeDeps();
+    deps.fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    deps.rebuild = vi.fn().mockResolvedValue({
+      manifest,
+      rebuiltZipPath
+    });
+    deps.renderRebuildPreview = vi.fn().mockResolvedValue('<html>preview</html>');
+
+    await rebuildAction(
+      '/path/to/test.zip',
+      { engagement: 'eng-1', mode: 'full', checkpoint: false },
+      deps
+    );
+
+    expect(deps.rebuild).toHaveBeenCalled();
+    const rebuildOpts = deps.rebuild.mock.calls[0][2];
+    expect(rebuildOpts.noCheckpoint).toBe(true);
+    expect(deps.verify).toHaveBeenCalled();
+    expect(deps.renderRebuildDiff).toHaveBeenCalled();
+    expect(deps.renderRebuildSummary).toHaveBeenCalled();
+    expect(deps.renderRebuildPreview).toHaveBeenCalled();
+    expect(deps.fsp.copyFile).toHaveBeenCalled();
+    expect(mockExit).toHaveBeenCalledWith(0);
+  });
+
+  it('--mode full --no-checkpoint exits 2 on verification regression', async () => {
+    const deps = makeDeps();
+    deps.fsp.stat = vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    deps.rebuild = vi.fn().mockResolvedValue({
+      manifest,
+      rebuiltZipPath
+    });
+    deps.verify = vi.fn().mockResolvedValue(makeVerifyResult({
+      introduced: 2,
+      hasRegression: true
+    }));
+    deps.renderRebuildPreview = vi.fn().mockResolvedValue('<html>preview</html>');
+
+    await rebuildAction(
+      '/path/to/test.zip',
+      { engagement: 'eng-1', mode: 'full', checkpoint: false },
+      deps
+    );
+
+    expect(mockExit).toHaveBeenCalledWith(2);
+    expect(deps.fsp.copyFile).not.toHaveBeenCalled();
   });
 
   it('runs audit when no results.json exists, then rebuilds', async () => {

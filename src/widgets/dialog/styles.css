@@ -1,0 +1,145 @@
+/*
+ * Prism widget: Dialog
+ * Selectors scoped to .prism-widget-dialog and .prism-widget-dialog-host.
+ */
+.prism-widget-dialog-host {
+  --prism-dlg-paper: var(--prism-paper, #f3efe6);
+  --prism-dlg-paper-2: var(--prism-paper-2, #ebe5d6);
+  --prism-dlg-ink: var(--prism-ink, #111633);
+  --prism-dlg-ink-3: var(--prism-ink-3, #55597a);
+  --prism-dlg-rule: var(--prism-rule, #c8bfa8);
+  --prism-dlg-accent: var(--prism-accent, #2f7d72);
+  --prism-dlg-accent-deep: var(--prism-accent-deep, #1d4f48);
+  font-family: inherit;
+  color: var(--prism-dlg-ink);
+  display: inline-block;
+}
+
+.prism-widget-dialog__trigger {
+  appearance: none;
+  background: var(--prism-dlg-accent);
+  border: 1px solid var(--prism-dlg-accent-deep);
+  border-radius: 3px;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+}
+
+.prism-widget-dialog__trigger:hover {
+  background: var(--prism-dlg-accent-deep);
+}
+
+.prism-widget-dialog__trigger:focus {
+  outline: 2px solid var(--prism-dlg-accent-deep);
+  outline-offset: 2px;
+}
+
+.prism-widget-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 22, 51, 0.5);
+  z-index: 999;
+}
+
+.prism-widget-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--prism-dlg-paper);
+  border: 1px solid var(--prism-dlg-rule);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(17, 22, 51, 0.18);
+  max-width: 36rem;
+  width: calc(100% - 2rem);
+  max-height: calc(100vh - 4rem);
+  overflow: auto;
+  padding: 0;
+  z-index: 1000;
+}
+
+.prism-widget-dialog:focus {
+  outline: none;
+}
+
+.prism-widget-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--prism-dlg-rule);
+  background: var(--prism-dlg-paper-2);
+  gap: 0.5rem;
+}
+
+.prism-widget-dialog__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--prism-dlg-ink);
+}
+
+.prism-widget-dialog__close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--prism-dlg-ink);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prism-widget-dialog__close:hover {
+  background: var(--prism-dlg-paper);
+  border-color: var(--prism-dlg-rule);
+}
+
+.prism-widget-dialog__close:focus {
+  outline: 2px solid var(--prism-dlg-accent-deep);
+  outline-offset: 2px;
+}
+
+.prism-widget-dialog__desc {
+  margin: 0;
+  padding: 0.75rem 1rem 0;
+  color: var(--prism-dlg-ink-3);
+}
+
+.prism-widget-dialog__body {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.prism-widget-dialog__desc:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-widget-dialog {
+    transition: none;
+  }
+}
+
+@media print {
+  .prism-widget-dialog__backdrop {
+    display: none !important;
+  }
+  .prism-widget-dialog {
+    position: static !important;
+    transform: none !important;
+    display: block !important;
+    box-shadow: none;
+    max-height: none;
+    page-break-inside: avoid;
+  }
+  .prism-widget-dialog[hidden] {
+    display: block !important;
+  }
+  .prism-widget-dialog__close {
+    display: none;
+  }
+}

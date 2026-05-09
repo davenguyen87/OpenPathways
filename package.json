@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "description": "CLI tool for SCORM/AICC accessibility auditing with WCAG 2.1 AA + Section 508 deliverables, scoped for Cornerstone consultancy engagements",
   "main": "src/index.js",
   "bin": {

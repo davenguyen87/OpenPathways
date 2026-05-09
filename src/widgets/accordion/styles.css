@@ -1,0 +1,103 @@
+/*
+ * Prism widget: Accordion
+ * Selectors are scoped to .prism-widget-accordion.
+ * Brand tokens come from config/brand.json.
+ */
+.prism-widget-accordion {
+  --prism-acc-paper: var(--prism-paper, #f3efe6);
+  --prism-acc-paper-2: var(--prism-paper-2, #ebe5d6);
+  --prism-acc-ink: var(--prism-ink, #111633);
+  --prism-acc-ink-3: var(--prism-ink-3, #55597a);
+  --prism-acc-rule: var(--prism-rule, #c8bfa8);
+  --prism-acc-accent: var(--prism-accent, #2f7d72);
+  --prism-acc-accent-deep: var(--prism-accent-deep, #1d4f48);
+  --prism-acc-accent-soft: var(--prism-accent-soft, rgba(47, 125, 114, 0.14));
+  font-family: inherit;
+  color: var(--prism-acc-ink);
+  display: block;
+  margin: 1rem 0;
+  border: 1px solid var(--prism-acc-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.prism-widget-accordion__section + .prism-widget-accordion__section {
+  border-top: 1px solid var(--prism-acc-rule);
+}
+
+.prism-widget-accordion__heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.prism-widget-accordion__trigger {
+  appearance: none;
+  background: var(--prism-acc-paper);
+  border: 0;
+  color: var(--prism-acc-ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-weight: 600;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  width: 100%;
+}
+
+.prism-widget-accordion__trigger:hover {
+  background: var(--prism-acc-paper-2);
+}
+
+.prism-widget-accordion__trigger:focus {
+  outline: 2px solid var(--prism-acc-accent-deep);
+  outline-offset: -2px;
+}
+
+.prism-widget-accordion__trigger[aria-expanded="true"] {
+  background: var(--prism-acc-accent-soft);
+  color: var(--prism-acc-accent-deep);
+}
+
+.prism-widget-accordion__label {
+  flex: 1 1 auto;
+}
+
+.prism-widget-accordion__chevron {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  transition: transform 0.15s ease;
+}
+
+.prism-widget-accordion__trigger[aria-expanded="true"] .prism-widget-accordion__chevron {
+  transform: rotate(180deg);
+}
+
+.prism-widget-accordion__panel {
+  padding: 0.75rem 1rem;
+  background: var(--prism-acc-paper);
+  border-top: 1px solid var(--prism-acc-rule);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-widget-accordion__chevron {
+    transition: none;
+  }
+}
+
+@media print {
+  .prism-widget-accordion__trigger {
+    background: transparent;
+  }
+  .prism-widget-accordion__panel {
+    display: block !important;
+  }
+  .prism-widget-accordion__panel[hidden] {
+    display: block !important;
+  }
+  .prism-widget-accordion__chevron {
+    display: none;
+  }
+}

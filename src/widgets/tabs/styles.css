@@ -1,0 +1,93 @@
+/*
+ * Prism widget: Tabs
+ * Every selector is prefixed with .prism-widget-tabs.
+ * Brand tokens come from config/brand.json; safe fallbacks declared here.
+ */
+.prism-widget-tabs {
+  --prism-tabs-paper: var(--prism-paper, #f3efe6);
+  --prism-tabs-paper-2: var(--prism-paper-2, #ebe5d6);
+  --prism-tabs-ink: var(--prism-ink, #111633);
+  --prism-tabs-ink-3: var(--prism-ink-3, #55597a);
+  --prism-tabs-rule: var(--prism-rule, #c8bfa8);
+  --prism-tabs-accent: var(--prism-accent, #2f7d72);
+  --prism-tabs-accent-deep: var(--prism-accent-deep, #1d4f48);
+  --prism-tabs-accent-soft: var(--prism-accent-soft, rgba(47, 125, 114, 0.14));
+  font-family: inherit;
+  color: var(--prism-tabs-ink);
+  display: block;
+  margin: 1rem 0;
+}
+
+.prism-widget-tabs__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border-bottom: 2px solid var(--prism-tabs-rule);
+  margin: 0;
+  padding: 0;
+}
+
+.prism-widget-tabs__tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--prism-tabs-ink-3);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  position: relative;
+  bottom: -2px;
+}
+
+.prism-widget-tabs__tab:hover {
+  color: var(--prism-tabs-ink);
+  background: var(--prism-tabs-paper-2);
+}
+
+.prism-widget-tabs__tab:focus {
+  outline: 2px solid var(--prism-tabs-accent-deep);
+  outline-offset: -2px;
+}
+
+.prism-widget-tabs__tab[aria-selected="true"] {
+  color: var(--prism-tabs-accent-deep);
+  border-bottom-color: var(--prism-tabs-accent);
+  background: var(--prism-tabs-accent-soft);
+}
+
+.prism-widget-tabs__panel {
+  padding: 1rem;
+  border: 1px solid var(--prism-tabs-rule);
+  border-top: 0;
+  background: var(--prism-tabs-paper);
+}
+
+.prism-widget-tabs__panel:focus {
+  outline: 2px solid var(--prism-tabs-accent-deep);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-widget-tabs__tab,
+  .prism-widget-tabs__panel {
+    transition: none;
+  }
+}
+
+@media print {
+  .prism-widget-tabs__list {
+    display: none;
+  }
+  .prism-widget-tabs__panel {
+    display: block !important;
+    border: 1px solid #999;
+    margin-bottom: 0.5rem;
+    page-break-inside: avoid;
+  }
+  .prism-widget-tabs__panel[hidden] {
+    display: block !important;
+  }
+}

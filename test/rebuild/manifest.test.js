@@ -5,13 +5,15 @@ import os from 'os';
 import {
   createManifest,
   addPatch,
+  addTransform,
   addDeferred,
   setVerification,
   writeManifest,
   readManifest,
   validateManifest,
   validatePatch,
-  SCHEMA_VERSION
+  SCHEMA_VERSION,
+  SCHEMA_VERSION_V5
 } from '../../src/rebuild/manifest.js';
 import { buildPatch } from '../../src/rebuild/types.js';
 
@@ -369,5 +371,252 @@ describe('validatePatch', () => {
     delete p[field];
     const errors = validatePatch(p);
     expect(errors.some((e) => e.includes(field))).toBe(true);
+  });
+
+  it('accepts an optional, well-formed transformId', () => {
+    const p = { ...freshPatch(), id: 'patch-0001', transformId: 'transform-0001' };
+    expect(validatePatch(p)).toEqual([]);
+  });
+
+  it('rejects a malformed transformId', () => {
+    const p = { ...freshPatch(), id: 'patch-0001', transformId: 'transform-1' };
+    const errors = validatePatch(p);
+    expect(errors.some((e) => /transform-NNNN/.test(e))).toBe(true);
+  });
+});
+
+// ---------- v5 — transforms ----------------------------------------------
+
+function fullTierPatchOverride() {
+  return { tier: 'full', triage: 'author rework' };
+}
+
+function freshTransform(overrides = {}) {
+  return {
+    transformer: 'landmark-insertion',
+    family: 'landmark',
+    criteria: ['1.3.1', '2.4.1', '4.1.2'],
+    tier: 'full',
+    scope: {
+      files: ['shared/page-3.html', 'shared/page-4.html'],
+      manifestEdited: false
+    },
+    patchIds: [],
+    provenance: {
+      source: 'rule-based',
+      timestamp: '2026-05-08T14:22:09Z'
+    },
+    rationale: 'Promoted top-level wrapper to <main> on each page.',
+    previewPath: 'rebuild-preview.html#transform-XXXX',
+    requiresCheckpointApproval: true,
+    status: 'applied',
+    ...overrides
+  };
+}
+
+describe('addTransform', () => {
+  it('assigns sequential ids in transform-NNNN format', () => {
+    const m = freshManifest();
+    const p1 = addPatch(m, freshPatch(fullTierPatchOverride()));
+    const p2 = addPatch(m, freshPatch(fullTierPatchOverride()));
+    const p3 = addPatch(m, freshPatch(fullTierPatchOverride()));
+
+    const t1 = addTransform(m, freshTransform({ patchIds: [p1.id] }));
+    const t2 = addTransform(m, freshTransform({ patchIds: [p2.id, p3.id] }));
+
+    expect(t1.id).toBe('transform-0001');
+    expect(t2.id).toBe('transform-0002');
+    expect(m.transforms.map((t) => t.id)).toEqual(['transform-0001', 'transform-0002']);
+  });
+
+  it('links every patch in patchIds via transformId', () => {
+    const m = freshManifest();
+    const p1 = addPatch(m, freshPatch(fullTierPatchOverride()));
+    const p2 = addPatch(m, freshPatch(fullTierPatchOverride()));
+    const p3 = addPatch(m, freshPatch(fullTierPatchOverride()));
+
+    addTransform(m, freshTransform({ patchIds: [p1.id, p3.id] }));
+
+    expect(m.patches[0].transformId).toBe('transform-0001');
+    expect(m.patches[1].transformId).toBeUndefined();
+    expect(m.patches[2].transformId).toBe('transform-0001');
+  });
+
+  it('throws when a referenced patch id does not exist', () => {
+    const m = freshManifest();
+    addPatch(m, freshPatch(fullTierPatchOverride()));
+
+    expect(() =>
+      addTransform(m, freshTransform({ patchIds: ['patch-9999'] }))
+    ).toThrow(/patch-9999/);
+  });
+
+  it('throws when a required transform field is missing', () => {
+    const m = freshManifest();
+    const t = freshTransform();
+    delete t.family;
+    expect(() => addTransform(m, t)).toThrow(/family/);
+  });
+});
+
+describe('validateManifest — v5 cross-references', () => {
+  it('rejects a transform whose patchIds references a missing patch', () => {
+    const m = freshManifest();
+    m.schemaVersion = SCHEMA_VERSION_V5;
+    addPatch(m, freshPatch(fullTierPatchOverride()));
+    m.transforms = [
+      {
+        ...freshTransform({ patchIds: ['patch-0001', 'patch-9999'] }),
+        id: 'transform-0001'
+      }
+    ];
+    const result = validateManifest(m);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /patch-9999/.test(e))).toBe(true);
+  });
+
+  it('rejects a patch whose transformId references a missing transform', () => {
+    const m = freshManifest();
+    m.schemaVersion = SCHEMA_VERSION_V5;
+    addPatch(m, freshPatch(fullTierPatchOverride()));
+    m.patches[0].transformId = 'transform-0009';
+    m.transforms = [];
+    const result = validateManifest(m);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /transform-0009/.test(e))).toBe(true);
+  });
+
+  it('rejects a transform with requiresCheckpointApproval=true in an invalid status like applied-direct', () => {
+    const m = freshManifest();
+    m.schemaVersion = SCHEMA_VERSION_V5;
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    m.transforms = [
+      {
+        ...freshTransform({ patchIds: [p.id] }),
+        id: 'transform-0001',
+        status: 'applied-direct',
+        requiresCheckpointApproval: true
+      }
+    ];
+    const result = validateManifest(m);
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((e) => /pending-checkpoint|applied-direct|status/.test(e))
+    ).toBe(true);
+  });
+
+  it('rejects a transform with manifestEdited=true that omits imsmanifest.xml from scope.files', () => {
+    const m = freshManifest();
+    m.schemaVersion = SCHEMA_VERSION_V5;
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    m.transforms = [
+      {
+        ...freshTransform({ patchIds: [p.id] }),
+        id: 'transform-0001',
+        family: 'page-split',
+        scope: {
+          files: ['shared/page-1.html', 'shared/page-2.html'],
+          manifestEdited: true
+        }
+      }
+    ];
+    const result = validateManifest(m);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /imsmanifest\.xml/.test(e))).toBe(true);
+  });
+
+  it('accepts a transform with manifestEdited=true when imsmanifest.xml is in scope.files', () => {
+    const m = finalizedManifest();
+    m.schemaVersion = SCHEMA_VERSION_V5;
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    addTransform(m, freshTransform({
+      patchIds: [p.id],
+      family: 'page-split',
+      scope: {
+        files: ['shared/page-1.html', 'imsmanifest.xml'],
+        manifestEdited: true
+      }
+    }));
+    const result = validateManifest(m);
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it('rejects a non-2.0.0 schemaVersion when transforms is non-empty', () => {
+    const m = freshManifest();
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    addTransform(m, freshTransform({ patchIds: [p.id] }));
+    // simulate a stale writer that left schemaVersion at 1.0.0
+    m.schemaVersion = SCHEMA_VERSION;
+    const result = validateManifest(m);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /2\.0\.0/.test(e))).toBe(true);
+  });
+});
+
+describe('schema versioning — v4 byte-identity preserved', () => {
+  it('a manifest with zero transforms writes as schemaVersion "1.0.0" and reads back equal', () => {
+    const m = finalizedManifest();
+    addPatch(m, freshPatch());
+    setVerification(
+      m,
+      { violations: 1, criteriaFailed: 1, section508Failed: 0 },
+      { violations: 0, criteriaFailed: 0, section508Failed: 0 }
+    );
+
+    const tmp = path.join(os.tmpdir(), `prism-manifest-v4-${Date.now()}.json`);
+    try {
+      writeManifest(m, tmp);
+      const raw = fs.readFileSync(tmp, 'utf8');
+      // schemaVersion is the first key, and must be exactly "1.0.0"
+      expect(raw).toMatch(/^\{\s*"schemaVersion": "1\.0\.0"/);
+      // No transforms block on disk.
+      expect(raw).not.toMatch(/"transforms"/);
+
+      const loaded = readManifest(tmp);
+      expect(loaded.schemaVersion).toBe('1.0.0');
+      expect(loaded).toEqual(JSON.parse(raw));
+    } finally {
+      try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+    }
+  });
+
+  it('a manifest with one transform writes as schemaVersion "2.0.0" and round-trips', () => {
+    const m = finalizedManifest();
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    addTransform(m, freshTransform({ patchIds: [p.id] }));
+
+    const tmp = path.join(os.tmpdir(), `prism-manifest-v5-${Date.now()}.json`);
+    try {
+      writeManifest(m, tmp);
+      const raw = fs.readFileSync(tmp, 'utf8');
+      expect(raw).toMatch(/^\{\s*"schemaVersion": "2\.0\.0"/);
+      expect(raw).toMatch(/"transforms"/);
+
+      const loaded = readManifest(tmp);
+      expect(loaded.schemaVersion).toBe('2.0.0');
+      expect(loaded.transforms).toHaveLength(1);
+      expect(loaded.transforms[0].id).toBe('transform-0001');
+      expect(loaded.patches[0].transformId).toBe('transform-0001');
+      expect(loaded).toEqual(JSON.parse(raw));
+    } finally {
+      try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+    }
+  });
+
+  it('auto-bumps schemaVersion on serialize when transforms become non-empty', () => {
+    const m = finalizedManifest();
+    expect(m.schemaVersion).toBe('1.0.0');
+
+    const p = addPatch(m, freshPatch(fullTierPatchOverride()));
+    addTransform(m, freshTransform({ patchIds: [p.id] }));
+
+    const tmp = path.join(os.tmpdir(), `prism-manifest-bump-${Date.now()}.json`);
+    try {
+      writeManifest(m, tmp);
+      const loaded = readManifest(tmp);
+      expect(loaded.schemaVersion).toBe('2.0.0');
+    } finally {
+      try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+    }
   });
 });

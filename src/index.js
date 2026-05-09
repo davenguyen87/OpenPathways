@@ -433,4 +433,20 @@ function findScoForFile(filePath, scos) {
 // can adopt it as a library call without going through the CLI.
 const { rebuild, rebuildLibrary } = require('./rebuild/index');
 
-module.exports = { audit, rebuild, rebuildLibrary };
+// v5 surface: checkpoint module + preview renderer. The checkpoint module
+// is shipped by chunk 08; we lazy-load via a property accessor so the
+// initial require of src/index.js doesn't fail in test environments where
+// chunk 08 hasn't merged yet. The preview renderer (chunk 06) ships
+// alongside chunk 07 and is safe to require eagerly.
+const { renderRebuildPreview } = require('./reporter/rebuild-preview');
+
+const moduleExports = { audit, rebuild, rebuildLibrary, renderRebuildPreview };
+Object.defineProperty(moduleExports, 'checkpoint', {
+  enumerable: true,
+  configurable: true,
+  get() {
+    return require('./rebuild/checkpoint');
+  }
+});
+
+module.exports = moduleExports;

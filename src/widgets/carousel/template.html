@@ -1,0 +1,66 @@
+<!--
+  Prism widget: Carousel
+  APG pattern: Carousel (Tabbed) — manual rotation, no autoplay
+  Placeholders:
+    {{carouselLabel}}  - accessible label for the carousel region (plain text)
+    {{prevLabel}}      - label for the previous-slide button (default "Previous slide")
+    {{nextLabel}}      - label for the next-slide button (default "Next slide")
+    {{slideId.N}}      - unique id for slide N
+    {{slideLabel.N}}   - aria-label for slide N (e.g. "Slide 1 of 4: Onboarding")
+    {{slideHTML.N}}    - slide body HTML (sanitized upstream)
+  Repeat the [data-prism-slide] block once per slide. Tooltip-styled hint
+  appears below the controls when keyboard focus enters them.
+-->
+<section
+  class="prism-widget-carousel"
+  data-prism-widget="carousel"
+  aria-roledescription="carousel"
+  aria-label="{{carouselLabel}}"
+>
+  <div class="prism-widget-carousel__viewport">
+    <div
+      class="prism-widget-carousel__slide"
+      id="{{slideId.0}}"
+      role="group"
+      aria-roledescription="slide"
+      aria-label="{{slideLabel.0}}"
+      data-prism-slide
+    >{{slideHTML.0}}</div>
+    <div
+      class="prism-widget-carousel__slide"
+      id="{{slideId.1}}"
+      role="group"
+      aria-roledescription="slide"
+      aria-label="{{slideLabel.1}}"
+      hidden
+      data-prism-slide
+    >{{slideHTML.1}}</div>
+  </div>
+  <div class="prism-widget-carousel__controls">
+    <button
+      type="button"
+      class="prism-widget-carousel__prev"
+      aria-label="{{prevLabel}}"
+      data-prism-prev
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" focusable="false" aria-hidden="true">
+        <path d="M10 3l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <p
+      class="prism-widget-carousel__status"
+      aria-live="polite"
+      data-prism-status
+    >Slide 1 of 2</p>
+    <button
+      type="button"
+      class="prism-widget-carousel__next"
+      aria-label="{{nextLabel}}"
+      data-prism-next
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" focusable="false" aria-hidden="true">
+        <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+</section>

@@ -34,6 +34,47 @@
  * @property {string} rationale
  * @property {boolean} reversible
  * @property {'applied'|'reverted'|'rejected'} status
+ * @property {string} [transformId] - v5: links a full-tier patch to its parent transform
+ *
+ * @typedef {Object} TransformScope
+ * @property {string[]} files - package-relative paths the transform writes to
+ * @property {boolean} manifestEdited - true when the transform edits imsmanifest.xml
+ *
+ * @typedef {Object} Transform
+ * @property {string} id - transform-NNNN, assigned by manifest.addTransform
+ * @property {string} transformer - id of the transformer module that emitted this
+ * @property {'landmark'|'widget'|'page-split'} family
+ * @property {string[]} criteria - WCAG criteria the transform addresses
+ * @property {'full'} tier
+ * @property {TransformScope} scope
+ * @property {string[]} patchIds - ids of every patch produced by this transform
+ * @property {Provenance} provenance
+ * @property {string} rationale
+ * @property {string} previewPath - anchor into rebuild-preview.html
+ * @property {boolean} requiresCheckpointApproval
+ * @property {'pending-checkpoint'|'applied'|'reverted'|'rejected'} status
+ * @property {string} [checkpointApprovedBy]
+ * @property {string} [checkpointApprovedAt]
+ *
+ * The Transformer interface is a duck-typed contract — there is no runtime
+ * base class. v5 transformers expose:
+ *
+ *   {
+ *     id: string,
+ *     name: string,
+ *     family: 'landmark'|'widget'|'page-split',
+ *     supported: string[],            // 'scorm12' | 'scorm2004' | 'aicc'
+ *     criteria: string[],
+ *     triage: string,                 // matches v3 triage taxonomy
+ *     tier: 'full',
+ *     provenance: 'rule-based'|'llm',
+ *
+ *     canTransform(packageContext): boolean,
+ *     async apply(packageContext): { transform: Transform, patches: Patch[], log: string[] },
+ *     async revert(packageContext, transform): { patches: Patch[], log: string[] }
+ *   }
+ *
+ * Fixers (v4 / v4.1) and Transformers (v5) coexist. Fixers are unchanged.
  *
  * @typedef {Object} DeferredFinding
  * @property {string} criterion
@@ -69,6 +110,7 @@
  * @property {string} createdAt
  * @property {ToolMeta} tool
  * @property {Patch[]} patches
+ * @property {Transform[]} [transforms] - v5: present (and serialized) only when non-empty
  * @property {DeferredFinding[]} deferred
  * @property {Verification} verification
  */
@@ -247,11 +289,31 @@ function applyMods(original, mods) {
   return out;
 }
 
+/**
+ * Pure helper: return a copy of `patch` with `transformId` set. Does not
+ * mutate the input. Used by `manifest.addTransform` to link every patch in a
+ * transform's `patchIds` back to its parent transform.
+ *
+ * @param {Patch} patch
+ * @param {string} transformId
+ * @returns {Patch}
+ */
+function linkPatchToTransform(patch, transformId) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new TypeError('patch must be an object');
+  }
+  if (typeof transformId !== 'string' || transformId.length === 0) {
+    throw new TypeError('transformId must be a non-empty string');
+  }
+  return { ...patch, transformId };
+}
+
 module.exports = {
   offsetToLineCol,
   captureContext,
   buildPatch,
   revertPatch,
   applyMods,
+  linkPatchToTransform,
   PATCH_CONTEXT_CHARS
 };

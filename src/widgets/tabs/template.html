@@ -1,0 +1,57 @@
+<!--
+  Prism widget: Tabs
+  APG pattern: Tabs (manual activation)
+  Placeholders:
+    {{tabsLabel}}      - accessible label for the whole tablist (string, plain text)
+    {{tabId.N}}        - unique id for tab N (e.g. "tab-foo-1")
+    {{panelId.N}}      - unique id for panel N (e.g. "panel-foo-1")
+    {{tabLabel.N}}     - tab N's visible label (string, plain text — escape upstream)
+    {{panelHTML.N}}    - tab N's panel content (sanitized HTML fragment)
+    {{selectedIndex}}  - 0-based index of the initially selected tab (default 0)
+  Repeat the [data-prism-tab] / [data-prism-panel] blocks once per tab.
+-->
+<div class="prism-widget-tabs" data-prism-widget="tabs">
+  <div
+    class="prism-widget-tabs__list"
+    role="tablist"
+    aria-label="{{tabsLabel}}"
+  >
+    <button
+      type="button"
+      class="prism-widget-tabs__tab"
+      role="tab"
+      id="{{tabId.0}}"
+      aria-controls="{{panelId.0}}"
+      aria-selected="true"
+      tabindex="0"
+      data-prism-tab
+    >{{tabLabel.0}}</button>
+    <button
+      type="button"
+      class="prism-widget-tabs__tab"
+      role="tab"
+      id="{{tabId.1}}"
+      aria-controls="{{panelId.1}}"
+      aria-selected="false"
+      tabindex="-1"
+      data-prism-tab
+    >{{tabLabel.1}}</button>
+  </div>
+  <div
+    class="prism-widget-tabs__panel"
+    role="tabpanel"
+    id="{{panelId.0}}"
+    aria-labelledby="{{tabId.0}}"
+    tabindex="0"
+    data-prism-panel
+  >{{panelHTML.0}}</div>
+  <div
+    class="prism-widget-tabs__panel"
+    role="tabpanel"
+    id="{{panelId.1}}"
+    aria-labelledby="{{tabId.1}}"
+    tabindex="0"
+    hidden
+    data-prism-panel
+  >{{panelHTML.1}}</div>
+</div>

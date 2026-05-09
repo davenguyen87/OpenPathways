@@ -70,6 +70,14 @@ registerRebuild(program);
 registerRebuildLibrary(program);
 registerUndo(program);
 
+// ============================================================
+// SUBCOMMAND: rebuild-checkpoint (v5)
+// ============================================================
+// Parent command + approve / reject / list subcommands. Action functions
+// live in src/lib/checkpoint-cli.js for the same testability reason.
+const { registerCheckpoint } = require('./lib/checkpoint-cli');
+registerCheckpoint(program);
+
 program.parse(process.argv);
 
 // ============================================================

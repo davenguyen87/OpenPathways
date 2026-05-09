@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="com.example.course.multi" version="1.0"
+          xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+          xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="ORG-1">
+    <organization identifier="ORG-1">
+      <title>Multi-Lesson Course</title>
+      <item identifier="ITEM-INTRO" identifierref="RES-INTRO">
+        <title>Introduction</title>
+      </item>
+      <item identifier="ITEM-LESSON" identifierref="RES-LESSON">
+        <title>Main Lesson</title>
+        <adlcp:masteryscore>75</adlcp:masteryscore>
+        <adlcp:prerequisites type="aicc_script">ITEM-INTRO</adlcp:prerequisites>
+      </item>
+      <item identifier="ITEM-OUTRO" identifierref="RES-OUTRO">
+        <title>Conclusion</title>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="RES-INTRO" type="webcontent" adlcp:scormtype="sco" href="intro.html">
+      <file href="intro.html"/>
+    </resource>
+    <resource identifier="RES-LESSON" type="webcontent" adlcp:scormtype="sco" href="lesson.html">
+      <file href="lesson.html"/>
+      <file href="shared/styles.css"/>
+    </resource>
+    <resource identifier="RES-OUTRO" type="webcontent" adlcp:scormtype="sco" href="outro.html">
+      <file href="outro.html"/>
+    </resource>
+  </resources>
+</manifest>

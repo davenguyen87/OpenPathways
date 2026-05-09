@@ -1,0 +1,40 @@
+{
+  "_description": "End-to-end fixture exercising the orchestrator full dispatch: v4 fixers (add-alt-decorative + associate-form-label), v5 transformers (landmark-insertion, widget-replacement-tabs, page-split), and a deferred 1.4.4 finding.",
+  "packageName": "rebuild-full-mixed.zip",
+  "violations": {
+    "expectedCriteria": [
+      "1.1.1",
+      "1.3.1",
+      "2.4.1",
+      "3.3.2",
+      "4.1.2"
+    ]
+  },
+  "rebuild": {
+    "mode": "full",
+    "expectedFixers": [
+      "add-alt-decorative",
+      "associate-form-label"
+    ],
+    "expectedTransformers": [
+      "landmark-insertion",
+      "widget-replacement-tabs",
+      "page-split"
+    ],
+    "expectedTransformFamilies": [
+      "landmark",
+      "widget",
+      "page-split"
+    ],
+    "manifestEdited": true,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "deferred": {
+    "expectedCriteria": [
+      "1.4.4"
+    ]
+  }
+}

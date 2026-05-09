@@ -530,7 +530,14 @@ describe('rebuild-pipeline: tier dispatch', () => {
     }
   });
 
-  it('mode=full returns no zip, empty patches, all findings deferred', async () => {
+  it('mode=full stages output under .rebuild-staging/ when transformers are present', async () => {
+    // v5 changed the contract: mode=full no longer short-circuits to a
+    // deferred-feature stub. It runs the full transformer pass and stages
+    // outputs under .rebuild-staging/ unless --no-checkpoint is passed.
+    // We use an empty transformers directory so this test stays
+    // independent of the transformers shipped in chunk 03/04/05.
+    const emptyTransformersDir = makeTmp('empty-tx');
+    const outDir = makeTmp('full-mode-out');
     const auditResults = syntheticAudit([
       { criterion: '2.4.7', file: 'page1.html', line: 5, message: 'focus not visible', snippet: '<button>', triage: 'auto-fix safe' }
     ]);
@@ -538,13 +545,18 @@ describe('rebuild-pipeline: tier dispatch', () => {
     const result = await rebuild(FX_DECO, auditResults, {
       mode: 'full',
       engagementId: 'test-full',
-      packageName: 'rebuild-decorative-imgs.zip'
+      packageName: 'rebuild-decorative-imgs.zip',
+      outputDir: outDir,
+      transformersDir: emptyTransformersDir
     });
 
-    expect(result.rebuiltZipPath).toBeNull();
-    expect(result.manifest.patches).toHaveLength(0);
-    expect(result.manifest.deferred).toHaveLength(1);
-    expect(result.manifest.deferred[0].reason).toMatch(/tier=full/);
+    // Staged path returned, not the v4 inline path.
+    expect(result.rebuiltZipPath).toBeUndefined();
+    expect(result.stagedZipPath).toBeTruthy();
+    expect(fs.existsSync(result.stagedZipPath)).toBe(true);
+    // No transformer dispatched (empty registry), so no transforms in
+    // the manifest and the schemaVersion stays at 1.0.0 on serialization.
+    expect(result.manifest.transforms || []).toHaveLength(0);
   });
 });
 

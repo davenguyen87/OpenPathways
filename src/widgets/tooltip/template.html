@@ -1,0 +1,25 @@
+<!--
+  Prism widget: Tooltip
+  APG pattern: Tooltip
+  Placeholders:
+    {{tooltipId}}    - unique id for the tooltip element (referenced by aria-describedby)
+    {{triggerLabel}} - visible label on the trigger (plain text, escape upstream)
+    {{tipText}}      - tooltip body text (plain text — tooltips per APG must remain plain content)
+  Tooltip is hidden by default; appears on focus or pointer-hover of the trigger.
+  Used standalone, and as a primitive by carousel/dialog control buttons.
+-->
+<span class="prism-widget-tooltip" data-prism-widget="tooltip">
+  <button
+    type="button"
+    class="prism-widget-tooltip__trigger"
+    aria-describedby="{{tooltipId}}"
+    data-prism-trigger
+  >{{triggerLabel}}</button>
+  <span
+    class="prism-widget-tooltip__bubble"
+    role="tooltip"
+    id="{{tooltipId}}"
+    hidden
+    data-prism-tip
+  >{{tipText}}</span>
+</span>

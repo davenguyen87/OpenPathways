@@ -1,0 +1,67 @@
+/*
+ * Prism widget: Tooltip
+ * Selectors scoped to .prism-widget-tooltip.
+ */
+.prism-widget-tooltip {
+  --prism-tip-paper: var(--prism-paper, #f3efe6);
+  --prism-tip-paper-2: var(--prism-paper-2, #ebe5d6);
+  --prism-tip-ink: var(--prism-ink, #111633);
+  --prism-tip-rule: var(--prism-rule, #c8bfa8);
+  --prism-tip-accent-deep: var(--prism-accent-deep, #1d4f48);
+  font-family: inherit;
+  color: var(--prism-tip-ink);
+  position: relative;
+  display: inline-block;
+}
+
+.prism-widget-tooltip__trigger {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--prism-tip-rule);
+  border-radius: 3px;
+  color: var(--prism-tip-ink);
+  cursor: help;
+  font: inherit;
+  padding: 0.2rem 0.5rem;
+}
+
+.prism-widget-tooltip__trigger:focus {
+  outline: 2px solid var(--prism-tip-accent-deep);
+  outline-offset: 2px;
+}
+
+.prism-widget-tooltip__bubble {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 0;
+  background: var(--prism-tip-ink);
+  color: var(--prism-tip-paper);
+  padding: 0.35rem 0.6rem;
+  border-radius: 3px;
+  font-size: 0.875rem;
+  line-height: 1.3;
+  white-space: normal;
+  max-width: 18rem;
+  z-index: 10;
+  pointer-events: none;
+}
+
+@media print {
+  .prism-widget-tooltip__bubble {
+    position: static;
+    display: inline !important;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    margin-left: 0.25rem;
+  }
+  .prism-widget-tooltip__bubble[hidden] {
+    display: inline !important;
+  }
+  .prism-widget-tooltip__bubble::before {
+    content: "(";
+  }
+  .prism-widget-tooltip__bubble::after {
+    content: ")";
+  }
+}

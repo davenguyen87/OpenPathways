@@ -7,6 +7,7 @@ import * as cheerio from 'cheerio';
 import {
   createManifest,
   addPatch,
+  addTransform,
   addDeferred,
   setVerification
 } from '../../src/rebuild/manifest.js';
@@ -344,6 +345,113 @@ describe('renderRebuildSummary', () => {
     const $ = cheerio.load(html);
     const emptyText = $('.empty-deferred').text();
     expect(emptyText).toContain('No deferred findings');
+  });
+
+  it('v5: manifest with transforms shows transform-counts section and pointer to preview', async () => {
+    const m = buildSampleManifest({
+      extraPatches: [
+        { criterion: '1.3.1', file: 'shared/page-3.html' }
+      ]
+    });
+    // Promote the patch to a transform
+    const lp = m.patches[0];
+    addTransform(m, {
+      transformer: 'landmark-insertion',
+      family: 'landmark',
+      criteria: ['1.3.1'],
+      tier: 'full',
+      scope: { files: ['shared/page-3.html'], manifestEdited: false },
+      patchIds: [lp.id],
+      provenance: { source: 'rule-based', timestamp: '2026-05-07T14:22:09Z' },
+      rationale: 'Promoted main wrapper to <main>.',
+      previewPath: 'rebuild-preview.html#transform-0001',
+      requiresCheckpointApproval: true,
+      status: 'applied'
+    });
+    // Add a pending and a rejected transform with no child patches (allowed
+    // by the schema; patchIds may be empty when the transform's effect is
+    // only on imsmanifest.xml or when verification refused promotion).
+    // We need a real patch to attach for schema validity, so just attach the
+    // same patch — addTransform will re-link it (transformId becomes the
+    // most recent transform's id). For a SUMMARY test we only care that the
+    // counts surface, so it's OK that the second/third transforms reference
+    // the same patch.
+    addTransform(m, {
+      transformer: 'widget-replacement-tabs',
+      family: 'widget',
+      criteria: ['4.1.2'],
+      tier: 'full',
+      scope: { files: ['shared/page-3.html'], manifestEdited: false },
+      patchIds: [lp.id],
+      provenance: { source: 'rule-based', timestamp: '2026-05-07T14:22:09Z' },
+      rationale: 'Replaced div-soup tabs.',
+      previewPath: 'rebuild-preview.html#transform-0002',
+      requiresCheckpointApproval: true,
+      status: 'pending-checkpoint'
+    });
+    addTransform(m, {
+      transformer: 'page-split',
+      family: 'page-split',
+      criteria: ['2.4.1'],
+      tier: 'full',
+      scope: { files: ['shared/page-3.html'], manifestEdited: false },
+      patchIds: [lp.id],
+      provenance: { source: 'rule-based', timestamp: '2026-05-07T14:22:09Z' },
+      rationale: 'Split overflowing SCO.',
+      previewPath: 'rebuild-preview.html#transform-0003',
+      requiresCheckpointApproval: true,
+      status: 'rejected'
+    });
+
+    const out = tmp('transform-stats');
+    const html = await renderRebuildSummary(m, TEST_BRAND, out);
+    const $ = cheerio.load(html);
+
+    // Section is present
+    const section = $('.transform-stats');
+    expect(section.length).toBe(1);
+
+    // Stat numbers
+    expect($('[data-transform-stat="applied"]').text().trim()).toBe('1');
+    expect($('[data-transform-stat="pending"]').text().trim()).toBe('1');
+    expect($('[data-transform-stat="rejected"]').text().trim()).toBe('1');
+
+    // Pointer link to preview
+    expect($('.ts-pointer a[href="rebuild-preview.html"]').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('v5 back-compat: manifest with empty transforms[] renders byte-identical to v4 baseline', async () => {
+    // Build two identical-shape manifests; one stays v4-shape, the other
+    // explicitly carries an empty transforms array. The renderer must emit
+    // byte-identical output for both.
+    const v4 = buildSampleManifest({
+      extraPatches: [{ criterion: '1.1.1', file: 'shared/img/page-1.html' }],
+      verification: {
+        before: { violations: 5, criteriaFailed: 2, section508Failed: 1 },
+        after:  { violations: 1, criteriaFailed: 1, section508Failed: 0 }
+      }
+    });
+    const v5 = buildSampleManifest({
+      extraPatches: [{ criterion: '1.1.1', file: 'shared/img/page-1.html' }],
+      verification: {
+        before: { violations: 5, criteriaFailed: 2, section508Failed: 1 },
+        after:  { violations: 1, criteriaFailed: 1, section508Failed: 0 }
+      }
+    });
+    v5.transforms = [];
+
+    const a = tmp('v4-baseline');
+    const b = tmp('v5-empty-transforms');
+    const v4Html = await renderRebuildSummary(v4, TEST_BRAND, a);
+    const v5Html = await renderRebuildSummary(v5, TEST_BRAND, b);
+
+    expect(v5Html).toBe(v4Html);
+
+    // And no transform-stats section is emitted in either output.
+    const $v4 = cheerio.load(v4Html);
+    const $v5 = cheerio.load(v5Html);
+    expect($v4('.transform-stats').length).toBe(0);
+    expect($v5('.transform-stats').length).toBe(0);
   });
 
   it('method note lists fixer names alphabetically and references standard and diff link', async () => {

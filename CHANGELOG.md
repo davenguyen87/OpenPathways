@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-05-08
+
+### Added
+- **Full-tier rebuild.** Third and final rebuild tier. Coordinated, package-scoped rewrites via Transformers (separate interface from Fixers) that span multiple files and can edit `imsmanifest.xml`. Three transform families ship: landmark insertion + labeling, widget replacement (tabs / accordion / carousel / dialog), and page splitting. Run with `prism rebuild --mode full`.
+- **Vetted ARIA component library** at `src/widgets/`. Five widgets — tabs, accordion, carousel, dialog, tooltip — as vanilla HTML/CSS/JS fragments matching W3C ARIA Authoring Practices Guide patterns. Each ships with a print-clean stylesheet, idempotent IIFE-scoped script, and an axe-baseline.json proving zero violations.
+- **Checkpoint lifecycle.** Full-tier rebuilds stage outputs under `.rebuild-staging/` rather than overwriting. Promotion requires explicit operator approval via `prism rebuild-checkpoint approve`. New `rebuild-preview.html` renders side-by-side per-transform with a real approval form. New CLI commands: `rebuild-checkpoint approve|reject|list`. `--no-checkpoint` flag bypasses staging for CI scenarios; default is checkpoint-on.
+- **Atomic transform undo.** `prism rebuild-undo --transform <id>` reverts every patch in a transform together via the transformer's `revert()`. Mixed `--patch <id> --transform <id>` invocations are also supported. Undoing a single patch that belongs to a transform without including the transform is refused with a clear error.
+- **Manifest schema 2.0.0.** Adds the `transforms[]` block; each Patch gains an optional `transformId` that links it to its parent transform. v4 manifests (1.0.0) load unchanged; manifests with no transforms still emit as 1.0.0 byte-identical to v4.
+- **Promotion-time invariants.** Checkpoint promote re-runs `verify()`, validates rewritten `imsmanifest.xml` against the SCORM schema for any approved transform with `manifestEdited:true`, and walks the new `<organization>` to confirm SCO sequence integrity. Failure of any invariant rolls back the promotion atomically; the staging area is preserved.
+
+### Changed
+- `src/rebuild/index.js` — orchestrator now dispatches full-tier transformers after fixers, validates per-transform output, and handles the staging branch when full mode is active.
+- `src/rebuild/undo.js` — accepts both the legacy positional patch-ids form and the new `{ patches, transforms }` shape. v4 callers continue to work.
+- `src/reporter/rebuild-summary.js` — adds a transform stats section when transforms are present; back-compat byte-identical for manifests with no transforms.
+
+## [Unreleased - 4.x]
+
 ### Changed
 - **Renamed**: project renamed from Open Pathways to Prism. Internal-only rename; no functional changes. Package names: `prism` (root), `prism-web`, `prism-cloud`. CLI binary: `prism` (was `open-pathways`); re-run `npm link` from the project folder to refresh the global shorthand.
 - The JSON `tool` field and SARIF `tool.driver.name` now report `"prism"` (was `"open-pathways"`). Any downstream tooling parsing stored reports keyed on the old value will need updating.

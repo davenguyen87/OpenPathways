@@ -2,27 +2,27 @@
  * Rebuild orchestrator.
  *
  * Consumes audit results + the original `.zip` and produces a remediated
- * `.zip` plus a manifest of every patch. v4 ships safe-tier only;
- * `--mode assisted` and `--mode full` short-circuit to a deferred-feature
- * notice and write nothing to disk (see PRD v4 § "Tier dispatch").
+ * `.zip` plus a manifest of every patch.
  *
- * Responsibilities (chunk 01 only):
- *   1. Tier dispatch.
- *   2. Unpack the input zip into a temp working directory.
- *   3. Build a fixer registry (every safe-tier fixer in `fixersDir`).
- *   4. Group violations by file; let the first fixer that claims each
- *      violation own it; deferred otherwise.
- *   5. Apply per-file in declared (id-sorted) order, threading content
- *      through each fixer's apply().
- *   6. Validate each fixer's output (HTML reparses, JSON parses, CSS brace
- *      balance) and drop the patch set if invalid.
- *   7. Repackage to a new zip.
- *   8. Hash input + output, populate manifest, return.
+ * Tier dispatch:
+ *   - `mode === 'safe'`     — runs every safe-tier fixer (v4 path).
+ *   - `mode === 'assisted'` — deferred-feature stub until v4.1 lands.
+ *   - `mode === 'full'`     — runs safe + assisted fixers, then full-tier
+ *     transformers, then either stages output under `.rebuild-staging/`
+ *     (the default; chunk 08's checkpoint module promotes it) or writes
+ *     directly to the package root when `opts.noCheckpoint === true`.
+ *
+ * Order within full mode: fixers run per-file (the v4 pass) and THEN
+ * transformers run per-package (the v5 pass). Transformers consume the
+ * post-fix DOM; landmark insertion, for example, may read the labels
+ * assisted-tier added.
  *
  * Out of scope here: re-audit verification (chunk 02), undo (08), diff /
- * summary reports (05/06), CLI wiring (07).
+ * summary / preview reports (05/06), CLI wiring (07), checkpoint promotion
+ * (08).
  *
  * @typedef {import('./types').Patch} Patch
+ * @typedef {import('./types').Transform} Transform
  * @typedef {import('./types').RebuildManifest} RebuildManifest
  */
 
@@ -33,8 +33,9 @@ const path = require('path');
 const crypto = require('crypto');
 const cheerio = require('cheerio');
 
-const { createManifest, addPatch, addDeferred } = require('./manifest');
+const { createManifest, addPatch, addTransform, addDeferred } = require('./manifest');
 const { unpack, pack, sha256 } = require('./packager');
+const { loadTransformers } = require('../lib/transformer-registry');
 
 const DEFAULT_LOGGER = {
   info: (msg) => process.stdout.write(`${msg}\n`),
@@ -157,12 +158,635 @@ function validateContent(filePath, content) {
 }
 
 /**
+ * Detect package type by inspecting the on-disk extracted package. We use
+ * the SCORM 2004 / 1.2 namespace heuristic from the parser layer; AICC and
+ * cmi5 are out of scope for v5 transformers but we still report a value
+ * so a transformer can decline cleanly via its `supported` list.
+ *
+ * @param {string} rootDir
+ * @param {string} manifestXml
+ * @returns {'scorm12'|'scorm2004'|'aicc'|'cmi5'|'unknown'}
+ */
+function detectPackageType(rootDir, manifestXml) {
+  if (typeof manifestXml === 'string' && manifestXml.length > 0) {
+    if (/imscp_v1p1|adlcp_v1p3|adlseq_v1p3|2004/i.test(manifestXml)) return 'scorm2004';
+    if (/imscp_rootv1p1p2|adlcp_rootv1p2|1\.2/.test(manifestXml)) return 'scorm12';
+    return 'scorm12';
+  }
+  // No manifest XML — try common AICC siblings before giving up.
+  try {
+    const entries = fs.readdirSync(rootDir);
+    if (entries.some((e) => /\.crs$/i.test(e))) return 'aicc';
+    if (entries.includes('cmi5.xml')) return 'cmi5';
+  } catch (_) {
+    // ignore
+  }
+  return 'unknown';
+}
+
+/**
+ * Read every file under `rootDir` (recursively) into the package context's
+ * `files[]` array. Skips the entry-order sidecar so transformers don't
+ * reason about packager bookkeeping. Files that fail to read as utf-8 are
+ * still recorded (with `content: null` and a `binary: true` flag) so a
+ * transformer can choose to ignore them rather than crash.
+ *
+ * @param {string} rootDir
+ * @returns {{ path: string, content: string|null, mime: string, binary: boolean }[]}
+ */
+function readAllFiles(rootDir) {
+  const out = [];
+  function walk(dir, rel) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      const r = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) {
+        walk(full, r);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      // Skip the packager's entry-order sidecar — it's bookkeeping, not a
+      // package file.
+      if (r === '.prism-entry-order.json') continue;
+
+      let content = null;
+      let binary = false;
+      try {
+        content = fs.readFileSync(full, 'utf8');
+      } catch (_) {
+        binary = true;
+      }
+      const lower = r.toLowerCase();
+      let mime = 'application/octet-stream';
+      if (lower.endsWith('.html') || lower.endsWith('.htm')) mime = 'text/html';
+      else if (lower.endsWith('.xml')) mime = 'application/xml';
+      else if (lower.endsWith('.json')) mime = 'application/json';
+      else if (lower.endsWith('.css')) mime = 'text/css';
+      else if (lower.endsWith('.js')) mime = 'application/javascript';
+      else if (lower.endsWith('.txt')) mime = 'text/plain';
+      out.push({ path: r, content, mime, binary });
+    }
+  }
+  walk(rootDir, '');
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
+/**
+ * Validate that an in-memory imsmanifest.xml string is well-formed and
+ * parses against the SCORM parser's expectations. Returns
+ * `{ ok: true }` on success, `{ ok: false, reason }` otherwise.
+ *
+ * The parser is invoked indirectly: we write the candidate XML to a temp
+ * directory and call `parseScormPackage`. That mirrors the audit's own
+ * read path so a transformer that produces XML the audit can't load is
+ * caught here, not at re-audit time.
+ *
+ * @param {string} candidateXml
+ * @param {'scorm12'|'scorm2004'|'aicc'|'cmi5'|'unknown'} packageType
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+async function validateManifestXml(candidateXml, packageType) {
+  if (typeof candidateXml !== 'string' || candidateXml.length === 0) {
+    return { ok: false, reason: 'manifest xml is empty' };
+  }
+  // Cheap structural pass first — the parser tends to throw cryptic
+  // errors on truly malformed input; xml2js gives us a single clean
+  // error message.
+  let xml2js;
+  try {
+    xml2js = require('xml2js');
+  } catch (_) {
+    return { ok: true }; // xml2js absent (shouldn't happen — listed as a dep) — skip
+  }
+  const parser = new xml2js.Parser({ ignoreAttrs: false });
+  try {
+    await parser.parseStringPromise(candidateXml);
+  } catch (err) {
+    return { ok: false, reason: err && err.message ? err.message : String(err) };
+  }
+  // Targeted SCORM parse via the project's parser, but only when the
+  // package is a SCORM variant. AICC / cmi5 / unknown skip this — a
+  // page-split transform on a non-SCORM package would already have been
+  // declined via `supported`.
+  if (packageType === 'scorm12' || packageType === 'scorm2004') {
+    let parseScormPackage;
+    try {
+      ({ parseScormPackage } = require('../parser/scorm'));
+    } catch (_) {
+      return { ok: true };
+    }
+    let tmp;
+    try {
+      tmp = await fsp.mkdtemp(
+        path.join(os.tmpdir(), `prism-rebuild-manifest-validate-${crypto.randomBytes(4).toString('hex')}-`)
+      );
+      await fsp.writeFile(path.join(tmp, 'imsmanifest.xml'), candidateXml, 'utf8');
+      await parseScormPackage(tmp, packageType);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err && err.message ? err.message : String(err) };
+    } finally {
+      if (tmp) {
+        try { await fsp.rm(tmp, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+      }
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Run the full-tier transformer pass. Mutates `manifest` in place and
+ * writes touched files back to `workDir`. Drops any transform whose output
+ * fails per-file or manifest-XML validation, reverting its patches in
+ * reverse application order.
+ *
+ * @param {Object} args
+ * @param {RebuildManifest} args.manifest
+ * @param {string} args.workDir
+ * @param {string} args.packageName
+ * @param {Array} args.violations
+ * @param {boolean} args.stageOutputs - true when checkpoint mode is on
+ * @param {string} args.transformersDir
+ * @param {{ info: Function, warn: Function }} args.logger
+ * @param {Function} args.now
+ */
+async function runTransformerPass({
+  manifest,
+  workDir,
+  packageName,
+  violations,
+  stageOutputs,
+  transformersDir,
+  logger,
+  now
+}) {
+  const transformers = loadTransformers(transformersDir).filter((t) => t.tier === 'full');
+  if (transformers.length === 0) return;
+
+  // Find imsmanifest.xml (SCORM packages always have one at or near the
+  // root). The parser handles nested layouts; here we only need a path the
+  // transformer can edit and a string to seed packageContext.
+  const allFiles = readAllFiles(workDir);
+  const manifestEntry = allFiles.find((f) => /(^|\/)imsmanifest\.xml$/i.test(f.path));
+  const manifestRelPath = manifestEntry ? manifestEntry.path : 'imsmanifest.xml';
+  const manifestAbsPath = path.join(workDir, manifestRelPath);
+  let manifestXml = '';
+  try {
+    manifestXml = fs.readFileSync(manifestAbsPath, 'utf8');
+  } catch (_) {
+    manifestXml = '';
+  }
+  const packageType = detectPackageType(workDir, manifestXml);
+
+  const transformerLogs = [];
+  // Some transformers read findings under different field names. Provide
+  // every alias the v5 transformers consume (findings, audit.findings,
+  // audit.violations, auditFindings) so a transformer's apply() doesn't
+  // silently see an empty list and skip every page.
+  const findingsList = Array.isArray(violations) ? violations : [];
+  const packageContext = {
+    rootDir: workDir,
+    workDir,
+    manifestXml,
+    manifestPath: manifestAbsPath,
+    packageType,
+    parserVersion: packageType,
+    files: allFiles,
+    auditFindings: findingsList,
+    findings: findingsList,
+    audit: { findings: findingsList, violations: findingsList },
+    opts: {},
+    log: (msg) => transformerLogs.push(String(msg))
+  };
+
+  for (const transformer of transformers) {
+    let claims = false;
+    try {
+      claims = transformer.canTransform(packageContext);
+    } catch (_) {
+      claims = false;
+    }
+    if (!claims) continue;
+
+    let result;
+    try {
+      result = await transformer.apply(packageContext);
+    } catch (err) {
+      addDeferred(manifest, {
+        criterion: (transformer.criteria && transformer.criteria[0]) || '',
+        triage: transformer.triage || 'author rework',
+        reason: `transformer ${transformer.id} threw: ${err && err.message ? err.message : String(err)}`,
+        file: '',
+        line: 0
+      });
+      continue;
+    }
+
+    if (!result || !Array.isArray(result.patches) || result.patches.length === 0) {
+      // No-op apply — the transformer claimed but emitted nothing. Not a
+      // failure; just skip.
+      continue;
+    }
+
+    const transformShape = result.transform || {};
+
+    // Append every patch first so we can build a stable patchIds list to
+    // hand to addTransform. Keep the assigned ids in declaration order.
+    const appendedPatches = [];
+    const writeQueue = []; // [{ filePath, beforeContent, afterContent }]
+    let writeOrderInvalid = false;
+    let appendError = null;
+
+    // We track per-file pre-transform content so revert reverses every
+    // edit cleanly even when a transformer wrote multiple patches to the
+    // same file.
+    const preTransformContent = new Map();
+    function readPre(filePath) {
+      if (preTransformContent.has(filePath)) return preTransformContent.get(filePath);
+      try {
+        const c = fs.readFileSync(path.join(workDir, filePath), 'utf8');
+        preTransformContent.set(filePath, c);
+        return c;
+      } catch (_) {
+        preTransformContent.set(filePath, null);
+        return null;
+      }
+    }
+
+    for (const rawPatch of result.patches) {
+      const patch = { ...rawPatch };
+      // Transformers often pre-populate transformId with a local placeholder
+      // (e.g. "<id>-local") so apply() returns self-consistent objects, but
+      // the manifest validator only accepts global "transform-NNNN" ids that
+      // addTransform assigns later. Strip the placeholder; addTransform calls
+      // linkPatchToTransform on every listed patch after the transform id is
+      // known, restoring the link with the correct value.
+      delete patch.transformId;
+      if (patch.tier === undefined) patch.tier = 'full';
+      if (patch.status === undefined) patch.status = 'applied';
+      if (patch.reversible === undefined) patch.reversible = true;
+      if (!patch.provenance) {
+        patch.provenance = {
+          source: transformer.provenance === 'llm' ? 'llm' : 'rule-based',
+          timestamp: now().toISOString()
+        };
+      }
+      if (patch.fixer === undefined) patch.fixer = transformer.id;
+
+      let appended;
+      try {
+        appended = addPatch(manifest, patch);
+      } catch (err) {
+        appendError = err;
+        break;
+      }
+      appendedPatches.push(appended);
+      // Pre-read every touched file so we can revert byte-identical on
+      // failure, even when multiple patches share a file.
+      if (appended.file) readPre(appended.file);
+      writeQueue.push({
+        filePath: appended.file,
+        before: appended.before,
+        after: appended.after
+      });
+    }
+
+    if (appendError) {
+      // Roll back any patches we *did* append before the failure. This is
+      // an in-memory rollback — nothing has been written to disk yet.
+      manifest.patches.length -= appendedPatches.length;
+      addDeferred(manifest, {
+        criterion: (transformer.criteria && transformer.criteria[0]) || '',
+        triage: transformer.triage || 'author rework',
+        reason: `transformer ${transformer.id} emitted invalid patch: ${appendError.message || String(appendError)}`,
+        file: '',
+        line: 0
+      });
+      continue;
+    }
+
+    // Write each patch's `after` content to disk by locating the patch's
+    // `before` substring in the current file content and substituting it.
+    // Special-case three shapes that v5 full-tier transforms produce:
+    //   - before === "": file creation. Write `after` directly. The file
+    //     may or may not already exist (a self-writing transformer like
+    //     page-split may have created it via ctx.workDir).
+    //   - after === "": file deletion. Remove the file if present.
+    //   - whole-file replacement (before is the file's prior content):
+    //     write `after` directly so we don't depend on substring location
+    //     when the content includes itself.
+    // Using indexOf-substitution (rather than offset arithmetic) for the
+    // common case means a transformer can list patches in any order
+    // without an interleaving bug, and it matches how `revertPatch` finds
+    // the after-text on undo.
+    const touchedFiles = new Set();
+    for (const w of writeQueue) {
+      if (!w.filePath) {
+        writeOrderInvalid = true;
+        break;
+      }
+      const diskPath = path.join(workDir, w.filePath);
+      // File deletion patch (after === "" with a non-empty before).
+      if (w.after === '' && w.before !== '') {
+        try {
+          fs.unlinkSync(diskPath);
+        } catch (_) {
+          // Already gone — likely a self-writing transformer removed it.
+        }
+        touchedFiles.add(w.filePath);
+        continue;
+      }
+      // File creation patch (before === "").
+      if (w.before === '') {
+        fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+        fs.writeFileSync(diskPath, w.after, 'utf8');
+        touchedFiles.add(w.filePath);
+        continue;
+      }
+      let current;
+      try {
+        current = fs.readFileSync(diskPath, 'utf8');
+      } catch (_) {
+        // File may have been removed by a self-writing transformer (e.g.
+        // page-split deletes the original SCO before this loop runs). If
+        // the file is gone but the patch shape is "delete" we already
+        // handled above; otherwise the writer has already done its work
+        // and there's nothing for us to do.
+        touchedFiles.add(w.filePath);
+        continue;
+      }
+      // Already-applied patch: file content matches `after` (a self-
+      // writing transformer produced the final content). Skip.
+      if (current === w.after) {
+        touchedFiles.add(w.filePath);
+        continue;
+      }
+      // Whole-file replacement: `before` IS the entire file content. Avoid
+      // the indexOf path so we don't accidentally match a substring.
+      if (current === w.before) {
+        fs.writeFileSync(diskPath, w.after, 'utf8');
+        touchedFiles.add(w.filePath);
+        continue;
+      }
+      const idx = current.indexOf(w.before);
+      if (idx === -1) {
+        writeOrderInvalid = true;
+        break;
+      }
+      const updated = current.slice(0, idx) + w.after + current.slice(idx + w.before.length);
+      fs.writeFileSync(diskPath, updated, 'utf8');
+      touchedFiles.add(w.filePath);
+    }
+
+    // Validate every touched file. HTML reparses, JSON parses, manifest
+    // XML validates against the SCORM schema (when scope.manifestEdited
+    // is true). Any failure drops the whole transform. Files that the
+    // transform deleted (last write for that path had after === "") are
+    // skipped — there's nothing to validate.
+    const deletedPaths = new Set();
+    for (const w of writeQueue) {
+      if (!w.filePath) continue;
+      if (w.after === '' && w.before !== '') deletedPaths.add(w.filePath);
+      else deletedPaths.delete(w.filePath); // a later write resurrected it
+    }
+    let dropReason = null;
+    if (writeOrderInvalid) {
+      dropReason = 'transformer produced invalid output';
+    } else {
+      for (const filePath of touchedFiles) {
+        if (deletedPaths.has(filePath)) continue;
+        const diskPath = path.join(workDir, filePath);
+        let content;
+        try {
+          content = fs.readFileSync(diskPath, 'utf8');
+        } catch (err) {
+          dropReason = `transformer produced invalid output: ${err.message || String(err)}`;
+          break;
+        }
+        const v = validateContent(filePath, content);
+        if (!v.ok) {
+          dropReason = 'transformer produced invalid output';
+          break;
+        }
+      }
+    }
+
+    if (
+      !dropReason &&
+      transformShape.scope &&
+      transformShape.scope.manifestEdited === true
+    ) {
+      // Re-read the on-disk manifest XML (the transformer may have
+      // rewritten it) and validate.
+      const xmlForValidation = (() => {
+        try {
+          return fs.readFileSync(manifestAbsPath, 'utf8');
+        } catch (_) {
+          return '';
+        }
+      })();
+      const result2 = await validateManifestXml(xmlForValidation, packageType);
+      if (!result2.ok) {
+        dropReason = 'transformer produced invalid output';
+      } else {
+        // Refresh the cached manifest XML so subsequent transformers see
+        // the post-edit version.
+        packageContext.manifestXml = xmlForValidation;
+      }
+    }
+
+    if (dropReason) {
+      // Revert in reverse order using each patch's `before` value. Mirror
+      // the create / delete / whole-file special cases used during apply.
+      for (let i = writeQueue.length - 1; i >= 0; i--) {
+        const w = writeQueue[i];
+        if (!w.filePath) continue;
+        const diskPath = path.join(workDir, w.filePath);
+        // Created file: rollback removes it.
+        if (w.before === '') {
+          try { fs.unlinkSync(diskPath); } catch (_) {}
+          continue;
+        }
+        // Deleted file: rollback restores content from `before`.
+        if (w.after === '' && w.before !== '') {
+          try {
+            fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+            fs.writeFileSync(diskPath, w.before, 'utf8');
+          } catch (_) {}
+          continue;
+        }
+        let current;
+        try {
+          current = fs.readFileSync(diskPath, 'utf8');
+        } catch (_) {
+          continue;
+        }
+        // Whole-file replacement.
+        if (current === w.after) {
+          fs.writeFileSync(diskPath, w.before, 'utf8');
+          continue;
+        }
+        const idx = current.indexOf(w.after);
+        if (idx === -1) {
+          // After-text isn't on disk — most likely because the write
+          // earlier in the loop never landed. Restore the pre-transform
+          // bytes if we have them.
+          const pre = preTransformContent.get(w.filePath);
+          if (typeof pre === 'string') {
+            fs.writeFileSync(diskPath, pre, 'utf8');
+          }
+          continue;
+        }
+        const reverted = current.slice(0, idx) + w.before + current.slice(idx + w.after.length);
+        fs.writeFileSync(diskPath, reverted, 'utf8');
+      }
+      // Restore any file we have a pre-transform snapshot for, in case
+      // partial writes left a file in a hybrid state (defensive — the
+      // indexOf path should already have made this unnecessary).
+      for (const [filePath, pre] of preTransformContent.entries()) {
+        if (typeof pre !== 'string') continue;
+        const diskPath = path.join(workDir, filePath);
+        try {
+          const current = fs.readFileSync(diskPath, 'utf8');
+          // Only overwrite if any after-text from this transform's queue
+          // is still present (defensive against an odd revert miss).
+          const stillDirty = writeQueue.some(
+            (w) => w.filePath === filePath && current.includes(w.after) && !current.includes(w.before)
+          );
+          if (stillDirty) fs.writeFileSync(diskPath, pre, 'utf8');
+        } catch (_) {
+          // best-effort
+        }
+      }
+      // Drop the transform's patches from the manifest. They were appended
+      // contiguously at the end of `manifest.patches`, so trim by length.
+      manifest.patches.length -= appendedPatches.length;
+      addDeferred(manifest, {
+        criterion: (transformer.criteria && transformer.criteria[0]) || '',
+        triage: transformer.triage || 'author rework',
+        reason: dropReason,
+        file: '',
+        line: 0
+      });
+      logger.warn(
+        `[rebuild] transformer ${transformer.id} dropped: ${dropReason}`
+      );
+      continue;
+    }
+
+    // Build the final Transform record. The transformer may have populated
+    // most fields already; we fill in defaults for the rest.
+    const provSource = transformer.provenance === 'llm' ? 'llm' : 'rule-based';
+    const status = stageOutputs ? 'pending-checkpoint' : 'applied';
+    const transformRecord = {
+      transformer: transformShape.transformer || transformer.id,
+      family: transformShape.family || transformer.family,
+      criteria: Array.isArray(transformShape.criteria)
+        ? transformShape.criteria.slice()
+        : (transformer.criteria || []).slice(),
+      tier: 'full',
+      scope: transformShape.scope && typeof transformShape.scope === 'object'
+        ? {
+            files: Array.isArray(transformShape.scope.files)
+              ? transformShape.scope.files.slice()
+              : Array.from(touchedFiles),
+            manifestEdited:
+              transformShape.scope.manifestEdited === true
+          }
+        : { files: Array.from(touchedFiles), manifestEdited: false },
+      patchIds: appendedPatches.map((p) => p.id),
+      provenance: transformShape.provenance && typeof transformShape.provenance === 'object'
+        ? { ...transformShape.provenance }
+        : { source: provSource, timestamp: now().toISOString() },
+      rationale: typeof transformShape.rationale === 'string' ? transformShape.rationale : '',
+      previewPath: typeof transformShape.previewPath === 'string'
+        ? transformShape.previewPath
+        : 'rebuild-preview.html',
+      requiresCheckpointApproval:
+        typeof transformShape.requiresCheckpointApproval === 'boolean'
+          ? transformShape.requiresCheckpointApproval
+          : true,
+      status
+    };
+    if (transformShape.checkpointApprovedBy !== undefined) {
+      transformRecord.checkpointApprovedBy = transformShape.checkpointApprovedBy;
+    }
+    if (transformShape.checkpointApprovedAt !== undefined) {
+      transformRecord.checkpointApprovedAt = transformShape.checkpointApprovedAt;
+    }
+
+    try {
+      addTransform(manifest, transformRecord);
+    } catch (err) {
+      // The shape already passed addPatch; an addTransform failure is most
+      // likely a bad scope or unresolved patch id. Roll back patches and
+      // file writes — mirror the create / delete / whole-file special
+      // cases applied during write.
+      for (let i = writeQueue.length - 1; i >= 0; i--) {
+        const w = writeQueue[i];
+        if (!w.filePath) continue;
+        const diskPath = path.join(workDir, w.filePath);
+        if (w.before === '') {
+          try { fs.unlinkSync(diskPath); } catch (_) {}
+          continue;
+        }
+        if (w.after === '' && w.before !== '') {
+          try {
+            fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+            fs.writeFileSync(diskPath, w.before, 'utf8');
+          } catch (_) {}
+          continue;
+        }
+        let current;
+        try {
+          current = fs.readFileSync(diskPath, 'utf8');
+        } catch (_) {
+          continue;
+        }
+        if (current === w.after) {
+          fs.writeFileSync(diskPath, w.before, 'utf8');
+          continue;
+        }
+        const idx = current.indexOf(w.after);
+        if (idx === -1) continue;
+        const reverted = current.slice(0, idx) + w.before + current.slice(idx + w.after.length);
+        fs.writeFileSync(diskPath, reverted, 'utf8');
+      }
+      manifest.patches.length -= appendedPatches.length;
+      addDeferred(manifest, {
+        criterion: (transformer.criteria && transformer.criteria[0]) || '',
+        triage: transformer.triage || 'author rework',
+        reason: `transformer ${transformer.id} produced invalid transform: ${err.message || String(err)}`,
+        file: '',
+        line: 0
+      });
+    }
+
+    // Refresh packageContext.files for downstream transformers so they see
+    // the post-transform DOM.
+    packageContext.files = readAllFiles(workDir);
+  }
+
+  // packageName is currently unused below but accepting it keeps the
+  // helper's signature stable for chunk 09's integration tests, which
+  // assert on a per-package log line.
+  void packageName;
+}
+
+/**
  * Main entry point. See module docstring for behavior.
  *
  * @param {string} packagePath
  * @param {{ violations?: Array, [k: string]: any }} auditResults
  * @param {object} [opts]
- * @returns {Promise<{ manifest: RebuildManifest, rebuiltZipPath: string|null }>}
+ * @returns {Promise<{ manifest: RebuildManifest, rebuiltZipPath?: string|null, stagedZipPath?: string, stagingDir?: string }>}
  */
 async function rebuild(packagePath, auditResults, opts) {
   const o = opts || {};
@@ -181,9 +805,11 @@ async function rebuild(packagePath, auditResults, opts) {
   // self-describing.
   const inputZipSha256 = await sha256(packagePath);
 
-  // Tier dispatch: assisted/full are stubs in v4. We still build a manifest
-  // so callers can introspect what *would* be deferred. No zip is written.
-  if (mode === 'assisted' || mode === 'full') {
+  // Tier dispatch: assisted is a stub until v4.1 lands. We still build a
+  // manifest so callers can introspect what *would* be deferred. No zip is
+  // written. v5 wires `mode === 'full'` further down — it falls through
+  // this stub and runs the safe fixer pass + the transformer pass.
+  if (mode === 'assisted') {
     const manifest = createManifest({
       engagementId,
       packageName,
@@ -212,15 +838,28 @@ async function rebuild(packagePath, auditResults, opts) {
     return { manifest, rebuiltZipPath: null };
   }
 
-  // Safe tier — the real path.
-  const manifest = createManifest({
+  // Real path. Safe and (in v5) full both flow through here. Full mode
+  // additionally runs the transformer pass after fixers and either stages
+  // the output (the default) or writes inline (`opts.noCheckpoint`).
+  //
+  // Order: fixers run per-file (the v4 pass) and THEN transformers run
+  // per-package (the v5 pass). Don't interleave.
+  const isFull = mode === 'full';
+  const stageOutputs = isFull && o.noCheckpoint !== true;
+
+  const manifestOpts = {
     engagementId,
     packageName,
     inputZipSha256,
-    mode: 'safe',
+    mode,
     standard,
     createdAt: now().toISOString()
-  });
+  };
+  // Bump schemaVersion only when the run actually intends to dispatch
+  // full-tier transformers. Safe / assisted modes keep "1.0.0" so v4 / v4.1
+  // byte-identical manifest output is preserved.
+  if (isFull) manifestOpts.schemaVersion = '2.0.0';
+  const manifest = createManifest(manifestOpts);
 
   // Working dir under os.tmpdir(); cleaned up in finally.
   const workDir = await fsp.mkdtemp(
@@ -228,6 +867,8 @@ async function rebuild(packagePath, auditResults, opts) {
   );
   // Output path: `<packageName>.rebuilt.zip`, replacing trailing `.zip` if
   // present (so `foo.zip` -> `foo.rebuilt.zip`, not `foo.zip.rebuilt.zip`).
+  // In full + checkpoint-on mode the output is staged under
+  // `<outputDir>/.rebuild-staging/rebuilt-staged.zip`; chunk 08 promotes it.
   const outputDir = o.outputDir || (await fsp.mkdtemp(
     path.join(os.tmpdir(), `prism-rebuild-out-${crypto.randomBytes(4).toString('hex')}-`)
   ));
@@ -235,7 +876,12 @@ async function rebuild(packagePath, auditResults, opts) {
   const baseName = packageName.toLowerCase().endsWith('.zip')
     ? packageName.slice(0, -4)
     : packageName;
-  const rebuiltZipPath = path.join(outputDir, `${baseName}.rebuilt.zip`);
+
+  const stagingDir = path.join(outputDir, '.rebuild-staging');
+  const stagedZipPath = path.join(stagingDir, 'rebuilt-staged.zip');
+  const stagedManifestPath = path.join(stagingDir, 'rebuild-manifest-staged.json');
+  const inlineRebuiltZipPath = path.join(outputDir, `${baseName}.rebuilt.zip`);
+  const rebuiltZipPath = stageOutputs ? stagedZipPath : inlineRebuiltZipPath;
 
   try {
     await unpack(packagePath, workDir);
@@ -409,11 +1055,43 @@ async function rebuild(packagePath, auditResults, opts) {
       }
     }
 
+    // ---------------------------------------------------------------------
+    // v5 full-tier transformer pass. Runs after every fixer has finished;
+    // each transformer sees the post-fix DOM. Skipped entirely when mode is
+    // not 'full', so safe / assisted output stays byte-identical to v4 /
+    // v4.1.
+    // ---------------------------------------------------------------------
+    if (isFull) {
+      await runTransformerPass({
+        manifest,
+        workDir,
+        packageName,
+        violations,
+        stageOutputs,
+        transformersDir: o.transformersDir || path.resolve(__dirname, '../transformers'),
+        logger,
+        now
+      });
+    }
+
+    if (stageOutputs) {
+      await fsp.mkdir(stagingDir, { recursive: true });
+    }
     await pack(workDir, rebuiltZipPath, manifest);
 
     const outputZipSha256 = await sha256(rebuiltZipPath);
     manifest.inputZipSha256 = inputZipSha256;
     manifest.outputZipSha256 = outputZipSha256;
+
+    if (stageOutputs) {
+      // Staged outputs live alongside the final zip under .rebuild-staging/.
+      // Chunk 08's checkpoint module reads / promotes both. The orchestrator
+      // does NOT call verify() against the staged zip; verification runs at
+      // promotion time (PRD v5 § "Checkpoint lifecycle" step 5).
+      const { writeManifest } = require('./manifest');
+      writeManifest(manifest, stagedManifestPath);
+      return { manifest, stagedZipPath, stagingDir };
+    }
 
     return { manifest, rebuiltZipPath };
   } finally {

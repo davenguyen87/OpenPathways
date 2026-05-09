@@ -1,0 +1,26 @@
+{
+  "_description": "SCORM 1.2 with three SCOs targeting page-split: a > 50 KB SCO with four <h1> boundaries (heuristic h1-anchor split), an SCO with explicit <!-- prism-split --> markers (separator-mode split), and a small SCO that qualifies on a 2.4.1 finding but cannot be split (no boundaries) — orchestrator deferment path.",
+  "packageName": "rebuild-overflowing-page.zip",
+  "violations": {
+    "expectedCriteria": [
+      "2.4.1"
+    ]
+  },
+  "rebuild": {
+    "mode": "full",
+    "expectedTransformers": [
+      "page-split"
+    ],
+    "expectedTransformFamilies": [
+      "page-split"
+    ],
+    "manifestEdited": true,
+    "expectedResolved": {
+      "gt": 0
+    },
+    "expectedIntroduced": 0
+  },
+  "notes": [
+    "page-split runs once per orchestrator pass; only the first qualifying SCO is split. The integration test asserts at least one transform of family page-split lands. The marker-mode SCO and small SCO may be picked up across successive orchestrator passes once chunk-05+ implements iteration; v5.0 splits one SCO."
+  ]
+}

@@ -1,0 +1,93 @@
+/*
+ * Prism widget: Carousel
+ * Selectors scoped to .prism-widget-carousel.
+ */
+.prism-widget-carousel {
+  --prism-car-paper: var(--prism-paper, #f3efe6);
+  --prism-car-paper-2: var(--prism-paper-2, #ebe5d6);
+  --prism-car-ink: var(--prism-ink, #111633);
+  --prism-car-ink-3: var(--prism-ink-3, #55597a);
+  --prism-car-rule: var(--prism-rule, #c8bfa8);
+  --prism-car-accent: var(--prism-accent, #2f7d72);
+  --prism-car-accent-deep: var(--prism-accent-deep, #1d4f48);
+  font-family: inherit;
+  color: var(--prism-car-ink);
+  display: block;
+  margin: 1rem 0;
+  border: 1px solid var(--prism-car-rule);
+  border-radius: 4px;
+  background: var(--prism-car-paper);
+}
+
+.prism-widget-carousel__viewport {
+  padding: 1rem;
+}
+
+.prism-widget-carousel__slide {
+  outline: none;
+}
+
+.prism-widget-carousel__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--prism-car-rule);
+  background: var(--prism-car-paper-2);
+  gap: 0.5rem;
+}
+
+.prism-widget-carousel__prev,
+.prism-widget-carousel__next {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--prism-car-rule);
+  border-radius: 3px;
+  color: var(--prism-car-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prism-widget-carousel__prev:hover,
+.prism-widget-carousel__next:hover {
+  background: var(--prism-car-paper);
+  border-color: var(--prism-car-accent-deep);
+}
+
+.prism-widget-carousel__prev:focus,
+.prism-widget-carousel__next:focus {
+  outline: 2px solid var(--prism-car-accent-deep);
+  outline-offset: 2px;
+}
+
+.prism-widget-carousel__prev[disabled],
+.prism-widget-carousel__next[disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.prism-widget-carousel__status {
+  margin: 0;
+  color: var(--prism-car-ink-3);
+  font-size: 0.875rem;
+}
+
+@media print {
+  .prism-widget-carousel__controls {
+    display: none;
+  }
+  .prism-widget-carousel__slide {
+    display: block !important;
+    border-bottom: 1px solid #999;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0;
+    page-break-inside: avoid;
+  }
+  .prism-widget-carousel__slide[hidden] {
+    display: block !important;
+  }
+}

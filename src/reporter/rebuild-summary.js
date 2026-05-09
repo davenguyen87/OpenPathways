@@ -76,7 +76,12 @@ function buildHtml(manifest, brand) {
   const deferredTable = renderDeferredTable(deferred);
   const methodNote = renderMethodNote(patches, manifest.standard);
 
-  return [
+  // v5: transform stats line — additive only. When `manifest.transforms` is
+  // empty/undefined this returns null and the section is omitted entirely so
+  // the document stays byte-identical to the v4 baseline (no extra newline).
+  const transformStats = renderTransformStats(manifest.transforms);
+
+  const sections = [
     '<!DOCTYPE html>',
     '<html lang="en">',
     '<head>',
@@ -95,14 +100,19 @@ function buildHtml(manifest, brand) {
     headerCard,
     scoreboard,
     standardsChips,
-    triageBreakdown,
+    triageBreakdown
+  ];
+  if (transformStats !== null) sections.push(transformStats);
+  sections.push(
     deferredTable,
     methodNote,
     '</article>',
     '</body>',
     '</html>',
     ''
-  ].join('\n');
+  );
+
+  return sections.join('\n');
 }
 
 /* ------------------------------------------------------------------ */
@@ -277,6 +287,47 @@ function renderTriageBreakdown(patches) {
     '<div class="tbar-legend">',
     legendRows,
     '</div>',
+    '</section>'
+  ].join('');
+}
+
+/**
+ * Render the v5 transform stats section. Returns `null` when `transforms` is
+ * empty/undefined so the surrounding template can omit the line entirely
+ * (preserving v4 byte-identical output for manifests without transforms).
+ *
+ * @param {import('../rebuild/types').Transform[]|undefined} transforms
+ * @returns {string|null}
+ */
+function renderTransformStats(transforms) {
+  if (!Array.isArray(transforms) || transforms.length === 0) return null;
+  const applied = transforms.filter((t) => t && t.status === 'applied').length;
+  const pending = transforms.filter((t) => t && t.status === 'pending-checkpoint').length;
+  const rejected = transforms.filter((t) => t && t.status === 'rejected').length;
+
+  // Styles are inlined inside the section so the global <style> block stays
+  // byte-identical to the v4 baseline for manifests without transforms.
+  const inlineStyle =
+    '<style>' +
+    '.transform-stats{break-inside:avoid;}' +
+    '.ts-row{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:12px 24px;margin:0 0 10px;padding:14px 18px;background:var(--paper-2);border:1.5px solid var(--ink);border-radius:6px;}' +
+    '.ts-row>div{margin:0;display:grid;gap:4px;}' +
+    '.ts-row dt{font:600 10px var(--font-mono);letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-3);}' +
+    '.ts-row dd{margin:0;font-family:var(--font-jersey);font-size:26px;line-height:1;letter-spacing:-0.02em;color:var(--ink);}' +
+    '.ts-pointer{margin:0;font:500 13px var(--font-sans);color:var(--ink-2);}' +
+    '.ts-pointer a{color:var(--accent-deep);}' +
+    '</style>';
+
+  return [
+    '<section class="transform-stats" aria-label="Transform statistics">',
+    inlineStyle,
+    '<h2 class="section-heading">Transforms</h2>',
+    '<dl class="ts-row">',
+    `<div><dt>Applied</dt><dd data-transform-stat="applied">${escapeHtml(String(applied))}</dd></div>`,
+    `<div><dt>Pending</dt><dd data-transform-stat="pending">${escapeHtml(String(pending))}</dd></div>`,
+    `<div><dt>Rejected</dt><dd data-transform-stat="rejected">${escapeHtml(String(rejected))}</dd></div>`,
+    '</dl>',
+    '<p class="ts-pointer">See <a href="rebuild-preview.html">rebuild-preview.html</a> for per-transform side-by-side review.</p>',
     '</section>'
   ].join('');
 }

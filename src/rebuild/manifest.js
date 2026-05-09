@@ -1,18 +1,23 @@
 /**
  * RebuildManifest — create, mutate, validate, read, write.
  *
- * The schema is the contract laid out in PRD v4 § "Manifest schema".
- * Validation is hand-written against that schema (no third-party validator).
+ * The schema is the contract laid out in PRD v4 § "Manifest schema" (1.0.0)
+ * and PRD v5 § "Manifest schema v2.0.0" (additive `transforms[]` block plus
+ * an optional `transformId` on each Patch). Validation is hand-written
+ * against the contract (no third-party validator).
  *
  * @typedef {import('./types').Patch} Patch
+ * @typedef {import('./types').Transform} Transform
  * @typedef {import('./types').RebuildManifest} RebuildManifest
  * @typedef {import('./types').DeferredFinding} DeferredFinding
  * @typedef {import('./types').VerificationCounts} VerificationCounts
  */
 
 const fs = require('fs');
+const { linkPatchToTransform } = require('./types');
 
 const SCHEMA_VERSION = '1.0.0';
+const SCHEMA_VERSION_V5 = '2.0.0';
 const TOOL_NAME = 'prism';
 const TOOL_VERSION = '4.0.0';
 
@@ -22,6 +27,10 @@ const VALID_TIERS = ['safe', 'assisted', 'full'];
 const VALID_PROVENANCE_SOURCES = ['deterministic', 'llm', 'rule-based'];
 const VALID_CONFIDENCES = ['definitive', 'likely', 'needs-review'];
 const VALID_STATUSES = ['applied', 'reverted', 'rejected'];
+const VALID_TRANSFORM_FAMILIES = ['landmark', 'widget', 'page-split'];
+const VALID_TRANSFORM_TIERS = ['full'];
+const VALID_TRANSFORM_STATUSES = ['pending-checkpoint', 'applied', 'reverted', 'rejected'];
+const VALID_SCHEMA_VERSIONS = [SCHEMA_VERSION, SCHEMA_VERSION_V5];
 
 const TOP_LEVEL_KEYS = [
   'schemaVersion',
@@ -38,7 +47,26 @@ const TOP_LEVEL_KEYS = [
   'verification'
 ];
 
-const OPTIONAL_TOP_LEVEL_KEYS = ['revertHistory'];
+const OPTIONAL_TOP_LEVEL_KEYS = ['revertHistory', 'transforms'];
+
+const TRANSFORM_KEYS = [
+  'id',
+  'transformer',
+  'family',
+  'criteria',
+  'tier',
+  'scope',
+  'patchIds',
+  'provenance',
+  'rationale',
+  'previewPath',
+  'requiresCheckpointApproval',
+  'status'
+];
+
+const OPTIONAL_TRANSFORM_KEYS = ['checkpointApprovedBy', 'checkpointApprovedAt'];
+
+const TRANSFORM_SCOPE_KEYS = ['files', 'manifestEdited'];
 
 const REVERT_HISTORY_KEYS = ['revertedAt', 'revertedBy', 'patchIds'];
 
@@ -65,7 +93,14 @@ const DEFERRED_KEYS = ['criterion', 'triage', 'reason', 'file', 'line'];
 
 /**
  * Build a fresh manifest. Required: engagementId, packageName, inputZipSha256.
- * Defaults: mode=safe, standard=wcag22, outputZipSha256='', createdAt=now.
+ * Defaults: mode=safe, standard=wcag22, outputZipSha256='', createdAt=now,
+ * schemaVersion="1.0.0".
+ *
+ * The default schemaVersion is intentionally 1.0.0 so v4 / v4.1 callers keep
+ * byte-identical output. v5 callers that intend to record full-tier transforms
+ * may pass `opts.schemaVersion: "2.0.0"` explicitly; even without that, the
+ * manifest will auto-bump to "2.0.0" on serialization once any transform is
+ * appended via `addTransform`.
  *
  * @param {Object} opts
  * @returns {RebuildManifest}
@@ -85,8 +120,13 @@ function createManifest(opts) {
     throw new Error(`standard must be one of ${VALID_STANDARDS.join('|')}`);
   }
 
+  const schemaVersion = o.schemaVersion || SCHEMA_VERSION;
+  if (!VALID_SCHEMA_VERSIONS.includes(schemaVersion)) {
+    throw new Error(`schemaVersion must be one of ${VALID_SCHEMA_VERSIONS.join('|')}`);
+  }
+
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion,
     engagementId: o.engagementId,
     packageName: o.packageName,
     inputZipSha256: o.inputZipSha256,
@@ -124,6 +164,65 @@ function addPatch(manifest, patch) {
     throw new Error(`invalid patch: ${errors.join('; ')}`);
   }
   manifest.patches.push(full);
+  return full;
+}
+
+/**
+ * Append a transform and assign it the next sequential id (transform-NNNN).
+ * Validates required fields. For every patch id listed in `transform.patchIds`
+ * the matching patch in `manifest.patches[]` has its `transformId` set via
+ * `linkPatchToTransform` (immutable swap — a new patch object replaces the
+ * existing one). Throws if any listed patch id is missing from the manifest.
+ *
+ * Mutates `manifest`: appends to `manifest.transforms` (creates the array if
+ * absent) and replaces affected patches in-place.
+ *
+ * @param {RebuildManifest} manifest
+ * @param {Transform} transform
+ * @returns {Transform} the appended transform (with id assigned)
+ */
+function addTransform(manifest, transform) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    throw new Error('manifest must be an object');
+  }
+  if (!Array.isArray(manifest.transforms)) {
+    manifest.transforms = [];
+  }
+
+  const seq = manifest.transforms.length + 1;
+  const id = `transform-${String(seq).padStart(4, '0')}`;
+  const full = { ...transform, id };
+
+  const errors = validateTransformShape(full);
+  if (errors.length > 0) {
+    throw new Error(`invalid transform: ${errors.join('; ')}`);
+  }
+
+  // Locate every patch named in patchIds before mutating anything so a
+  // missing id fails atomically.
+  const patchIndexById = new Map();
+  for (let i = 0; i < manifest.patches.length; i++) {
+    patchIndexById.set(manifest.patches[i].id, i);
+  }
+  const indices = [];
+  for (const pid of full.patchIds) {
+    if (!patchIndexById.has(pid)) {
+      throw new Error(`addTransform: patchId ${pid} not found in manifest.patches`);
+    }
+    indices.push(patchIndexById.get(pid));
+  }
+
+  // Link every listed patch to the new transform.
+  for (const idx of indices) {
+    manifest.patches[idx] = linkPatchToTransform(manifest.patches[idx], id);
+  }
+
+  manifest.transforms.push(full);
+  // Adding any transform bumps the manifest's required schemaVersion. Held
+  // here so callers reading the in-memory manifest see a consistent state
+  // and so writeManifest's validator accepts the manifest without further
+  // hand-editing.
+  manifest.schemaVersion = SCHEMA_VERSION_V5;
   return full;
 }
 
@@ -223,6 +322,11 @@ function readManifest(filePath) {
   if (!result.valid) {
     throw new Error(`invalid manifest at ${filePath}: ${result.errors.join('; ')}`);
   }
+  // 1.0.0 manifests omit the `transforms` field on disk and that omission is
+  // preserved on the returned object so a v4 round-trip stays byte-identical
+  // through write → read → write. Callers that need a uniform shape may
+  // default `transforms ?? []` themselves; the validator already treats a
+  // missing array as empty.
   return parsed;
 }
 
@@ -250,8 +354,14 @@ function validateManifest(manifest) {
     }
   }
 
-  if ('schemaVersion' in manifest && typeof manifest.schemaVersion !== 'string') {
-    errors.push('schemaVersion must be a string');
+  if ('schemaVersion' in manifest) {
+    if (typeof manifest.schemaVersion !== 'string') {
+      errors.push('schemaVersion must be a string');
+    } else if (!VALID_SCHEMA_VERSIONS.includes(manifest.schemaVersion)) {
+      errors.push(
+        `schemaVersion must be one of ${VALID_SCHEMA_VERSIONS.join('|')}`
+      );
+    }
   }
   if ('engagementId' in manifest && typeof manifest.engagementId !== 'string') {
     errors.push('engagementId must be a string');
@@ -326,7 +436,186 @@ function validateManifest(manifest) {
     }
   }
 
+  if ('transforms' in manifest) {
+    if (!Array.isArray(manifest.transforms)) {
+      errors.push('transforms must be an array');
+    } else {
+      manifest.transforms.forEach((t, i) => {
+        for (const e of validateTransformShape(t)) {
+          errors.push(`transforms[${i}]: ${e}`);
+        }
+      });
+    }
+  }
+
+  // v5 cross-reference + schema-version invariants.
+  const transforms = Array.isArray(manifest.transforms) ? manifest.transforms : [];
+  const patches = Array.isArray(manifest.patches) ? manifest.patches : [];
+
+  if (transforms.length > 0 && manifest.schemaVersion !== SCHEMA_VERSION_V5) {
+    errors.push(
+      `schemaVersion must be ${SCHEMA_VERSION_V5} when transforms is non-empty`
+    );
+  }
+
+  // Build id lookups once for the cross-reference checks.
+  const transformIds = new Set(
+    transforms.filter((t) => t && typeof t.id === 'string').map((t) => t.id)
+  );
+  const patchIds = new Set(
+    patches.filter((p) => p && typeof p.id === 'string').map((p) => p.id)
+  );
+
+  patches.forEach((p, i) => {
+    if (p && typeof p === 'object' && 'transformId' in p && p.transformId !== undefined) {
+      if (typeof p.transformId !== 'string') {
+        errors.push(`patches[${i}].transformId must be a string`);
+      } else if (!transformIds.has(p.transformId)) {
+        errors.push(
+          `patches[${i}].transformId references unknown transform: ${p.transformId}`
+        );
+      }
+    }
+  });
+
+  transforms.forEach((t, i) => {
+    if (!t || typeof t !== 'object') return;
+    if (Array.isArray(t.patchIds)) {
+      t.patchIds.forEach((pid, j) => {
+        if (typeof pid !== 'string') return;
+        if (!patchIds.has(pid)) {
+          errors.push(
+            `transforms[${i}].patchIds[${j}] references unknown patch: ${pid}`
+          );
+        }
+      });
+    }
+    if (
+      t.requiresCheckpointApproval === true &&
+      typeof t.status === 'string' &&
+      !VALID_TRANSFORM_STATUSES.includes(t.status)
+    ) {
+      errors.push(
+        `transforms[${i}].status must be one of ${VALID_TRANSFORM_STATUSES.join('|')} when requiresCheckpointApproval is true`
+      );
+    }
+    if (
+      t.scope &&
+      typeof t.scope === 'object' &&
+      t.scope.manifestEdited === true &&
+      Array.isArray(t.scope.files) &&
+      !t.scope.files.some((f) => typeof f === 'string' && /imsmanifest\.xml$/i.test(f))
+    ) {
+      errors.push(
+        `transforms[${i}].scope.files must include an imsmanifest.xml path when manifestEdited is true`
+      );
+    }
+  });
+
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate a Transform's shape. Returns error messages; never throws.
+ *
+ * @param {*} t
+ * @returns {string[]}
+ */
+function validateTransformShape(t) {
+  const errors = [];
+  if (!t || typeof t !== 'object' || Array.isArray(t)) {
+    return ['transform must be an object'];
+  }
+  for (const k of TRANSFORM_KEYS) {
+    if (!(k in t)) errors.push(`missing required field: ${k}`);
+  }
+  for (const k of Object.keys(t)) {
+    if (!TRANSFORM_KEYS.includes(k) && !OPTIONAL_TRANSFORM_KEYS.includes(k)) {
+      errors.push(`unknown transform field: ${k}`);
+    }
+  }
+  if ('id' in t) {
+    if (typeof t.id !== 'string') {
+      errors.push('id must be a string');
+    } else if (!/^transform-\d{4}$/.test(t.id)) {
+      errors.push('id must match transform-NNNN');
+    }
+  }
+  if ('transformer' in t && typeof t.transformer !== 'string') {
+    errors.push('transformer must be a string');
+  }
+  if ('family' in t && !VALID_TRANSFORM_FAMILIES.includes(t.family)) {
+    errors.push(`family must be one of ${VALID_TRANSFORM_FAMILIES.join('|')}`);
+  }
+  if ('criteria' in t) {
+    if (!Array.isArray(t.criteria)) {
+      errors.push('criteria must be an array');
+    } else {
+      t.criteria.forEach((c, i) => {
+        if (typeof c !== 'string') errors.push(`criteria[${i}] must be a string`);
+      });
+    }
+  }
+  if ('tier' in t && !VALID_TRANSFORM_TIERS.includes(t.tier)) {
+    errors.push(`tier must be one of ${VALID_TRANSFORM_TIERS.join('|')}`);
+  }
+  if ('scope' in t) {
+    const s = t.scope;
+    if (!s || typeof s !== 'object' || Array.isArray(s)) {
+      errors.push('scope must be an object');
+    } else {
+      for (const sk of TRANSFORM_SCOPE_KEYS) {
+        if (!(sk in s)) errors.push(`missing required field: scope.${sk}`);
+      }
+      if ('files' in s) {
+        if (!Array.isArray(s.files)) {
+          errors.push('scope.files must be an array');
+        } else {
+          s.files.forEach((f, i) => {
+            if (typeof f !== 'string') errors.push(`scope.files[${i}] must be a string`);
+          });
+        }
+      }
+      if ('manifestEdited' in s && typeof s.manifestEdited !== 'boolean') {
+        errors.push('scope.manifestEdited must be a boolean');
+      }
+    }
+  }
+  if ('patchIds' in t) {
+    if (!Array.isArray(t.patchIds)) {
+      errors.push('patchIds must be an array');
+    } else {
+      t.patchIds.forEach((p, i) => {
+        if (typeof p !== 'string') errors.push(`patchIds[${i}] must be a string`);
+      });
+    }
+  }
+  if ('provenance' in t) {
+    const prov = t.provenance;
+    if (!prov || typeof prov !== 'object' || Array.isArray(prov)) {
+      errors.push('provenance must be an object');
+    } else {
+      if (!VALID_PROVENANCE_SOURCES.includes(prov.source)) {
+        errors.push(`provenance.source must be one of ${VALID_PROVENANCE_SOURCES.join('|')}`);
+      }
+      if (typeof prov.timestamp !== 'string') errors.push('provenance.timestamp must be a string');
+    }
+  }
+  if ('rationale' in t && typeof t.rationale !== 'string') errors.push('rationale must be a string');
+  if ('previewPath' in t && typeof t.previewPath !== 'string') errors.push('previewPath must be a string');
+  if ('requiresCheckpointApproval' in t && typeof t.requiresCheckpointApproval !== 'boolean') {
+    errors.push('requiresCheckpointApproval must be a boolean');
+  }
+  if ('status' in t && !VALID_TRANSFORM_STATUSES.includes(t.status)) {
+    errors.push(`status must be one of ${VALID_TRANSFORM_STATUSES.join('|')}`);
+  }
+  if ('checkpointApprovedBy' in t && typeof t.checkpointApprovedBy !== 'string') {
+    errors.push('checkpointApprovedBy must be a string');
+  }
+  if ('checkpointApprovedAt' in t && typeof t.checkpointApprovedAt !== 'string') {
+    errors.push('checkpointApprovedAt must be a string');
+  }
+  return errors;
 }
 
 /**
@@ -416,6 +705,13 @@ function validatePatch(patch) {
   if ('status' in patch && !VALID_STATUSES.includes(patch.status)) {
     errors.push(`status must be one of ${VALID_STATUSES.join('|')}`);
   }
+  if ('transformId' in patch && patch.transformId !== undefined) {
+    if (typeof patch.transformId !== 'string') {
+      errors.push('transformId must be a string');
+    } else if (!/^transform-\d{4}$/.test(patch.transformId)) {
+      errors.push('transformId must match transform-NNNN');
+    }
+  }
   return errors;
 }
 
@@ -472,8 +768,15 @@ function validateVerification(v) {
 }
 
 function serialize(manifest) {
+  const hasTransforms = Array.isArray(manifest.transforms) && manifest.transforms.length > 0;
+  // Auto-bump schemaVersion to 2.0.0 when transforms are present, regardless
+  // of what `manifest.schemaVersion` currently says — the contract is "the
+  // emitted version is the highest the manifest content requires." Byte-
+  // identical v4 output is preserved when there are no transforms.
+  const schemaVersion = hasTransforms ? SCHEMA_VERSION_V5 : SCHEMA_VERSION;
+
   const ordered = {
-    schemaVersion: manifest.schemaVersion,
+    schemaVersion,
     engagementId: manifest.engagementId,
     packageName: manifest.packageName,
     inputZipSha256: manifest.inputZipSha256,
@@ -492,6 +795,9 @@ function serialize(manifest) {
     })),
     verification: orderedVerification(manifest.verification)
   };
+  if (hasTransforms) {
+    ordered.transforms = manifest.transforms.map((t) => orderedTransform(t));
+  }
   if (Array.isArray(manifest.revertHistory) && manifest.revertHistory.length > 0) {
     ordered.revertHistory = manifest.revertHistory.map((e) => ({
       revertedAt: e.revertedAt,
@@ -510,27 +816,62 @@ function orderedPatch(p) {
   if (p.provenance.model !== undefined) prov.model = p.provenance.model;
   if (p.provenance.promptHash !== undefined) prov.promptHash = p.provenance.promptHash;
   if (p.provenance.modelConfidence !== undefined) prov.modelConfidence = p.provenance.modelConfidence;
-  return {
+  const out = {
     id: p.id,
-    fixer: p.fixer,
-    criterion: p.criterion,
-    triage: p.triage,
-    tier: p.tier,
-    confidence: p.confidence,
-    provenance: prov,
-    file: p.file,
-    range: {
-      startLine: p.range.startLine,
-      startCol: p.range.startCol,
-      endLine: p.range.endLine,
-      endCol: p.range.endCol
-    },
-    before: p.before,
-    after: p.after,
-    rationale: p.rationale,
-    reversible: p.reversible,
-    status: p.status
+    fixer: p.fixer
   };
+  // transformId, when present, sits between fixer and criterion to match
+  // PRD v5 § "Manifest schema v2.0.0". When absent, the field is omitted
+  // entirely so v4 patches serialize byte-identical.
+  if (p.transformId !== undefined) out.transformId = p.transformId;
+  out.criterion = p.criterion;
+  out.triage = p.triage;
+  out.tier = p.tier;
+  out.confidence = p.confidence;
+  out.provenance = prov;
+  out.file = p.file;
+  out.range = {
+    startLine: p.range.startLine,
+    startCol: p.range.startCol,
+    endLine: p.range.endLine,
+    endCol: p.range.endCol
+  };
+  out.before = p.before;
+  out.after = p.after;
+  out.rationale = p.rationale;
+  out.reversible = p.reversible;
+  out.status = p.status;
+  return out;
+}
+
+function orderedTransform(t) {
+  const prov = {
+    source: t.provenance.source,
+    timestamp: t.provenance.timestamp
+  };
+  if (t.provenance.model !== undefined) prov.model = t.provenance.model;
+  if (t.provenance.promptHash !== undefined) prov.promptHash = t.provenance.promptHash;
+  if (t.provenance.modelConfidence !== undefined) prov.modelConfidence = t.provenance.modelConfidence;
+  const out = {
+    id: t.id,
+    transformer: t.transformer,
+    family: t.family,
+    criteria: [...t.criteria],
+    tier: t.tier,
+    scope: {
+      files: [...t.scope.files],
+      manifestEdited: t.scope.manifestEdited
+    },
+    patchIds: [...t.patchIds],
+    provenance: prov,
+    rationale: t.rationale,
+    previewPath: t.previewPath,
+    requiresCheckpointApproval: t.requiresCheckpointApproval,
+    status: t.status
+  };
+  if (t.checkpointApprovedBy !== undefined) out.checkpointApprovedBy = t.checkpointApprovedBy;
+  if (t.checkpointApprovedAt !== undefined) out.checkpointApprovedAt = t.checkpointApprovedAt;
+  return out;
 }
 
 function orderedVerification(v) {
@@ -554,13 +895,16 @@ function orderedVerification(v) {
 module.exports = {
   createManifest,
   addPatch,
+  addTransform,
   addDeferred,
   setVerification,
   writeManifest,
   readManifest,
   validateManifest,
   validatePatch,
+  validateTransform: validateTransformShape,
   SCHEMA_VERSION,
+  SCHEMA_VERSION_V5,
   TOOL_NAME,
   TOOL_VERSION
 };

@@ -69,17 +69,19 @@ function registerUndo(program, testOpts) {
     .requiredOption('--engagement <id>', 'Engagement ID (required)')
     .requiredOption('--package <name>', 'Package name (required), e.g. compliance-101.zip')
     .option('--patch <id>', 'Patch ID to revert (repeat for multiple: --patch patch-0001 --patch patch-0002)')
+    .option('--transform <id>', 'Transform ID to revert atomically (repeat for multiple: --transform transform-0001 --transform transform-0002). v5.')
     .option('--engagements-root <path>', 'Root directory for engagements (default: ./engagements)', './engagements')
     .action(async (cmdOpts) => {
-      // Collect --patch values. Commander stores repeated --option as an array
-      // when `.option` is declared without the variadic `...` syntax.
-      // We use the raw args to gather all --patch flags.
+      // Collect --patch and --transform values. Commander stores repeated
+      // --option as the LAST value when `.option` is not variadic, so we
+      // scan process.argv for every occurrence.
       const patchIds = collectPatchIds(program.args, cmdOpts);
+      const transformIds = collectFlagIds('--transform');
 
-      if (!patchIds || patchIds.length === 0) {
+      if ((!patchIds || patchIds.length === 0) && transformIds.length === 0) {
         console.error(
-          kleur.red('Error: at least one --patch <id> is required. ' +
-            'Example: --patch patch-0001 --patch patch-0002')
+          kleur.red('Error: at least one --patch <id> or --transform <id> is required. ' +
+            'Example: --patch patch-0001 --patch patch-0002 OR --transform transform-0001')
         );
         setExit(2);
         return;
@@ -89,11 +91,20 @@ function registerUndo(program, testOpts) {
       const engagementDir = path.resolve(engagementsRoot, cmdOpts.engagement);
 
       try {
-        const result = await undo(
-          engagementDir,
-          cmdOpts.package,
-          patchIds
-        );
+        // Chunk 08 extends undo to accept { patches, transforms } shape.
+        // For backward compatibility with the v4 `undo(engagementDir,
+        // packageName, patchIds, opts)` signature, we forward the old shape
+        // when only --patch was passed and the new shape when --transform
+        // is involved. The undo module decides how to dispatch.
+        let result;
+        if (transformIds.length > 0) {
+          result = await undo(engagementDir, cmdOpts.package, {
+            patches: patchIds || [],
+            transforms: transformIds
+          });
+        } else {
+          result = await undo(engagementDir, cmdOpts.package, patchIds);
+        }
 
         const remaining = result.manifest.verification
           ? result.manifest.verification.remaining
@@ -142,17 +153,32 @@ function registerUndo(program, testOpts) {
  */
 function collectPatchIds(_args, cmdOpts) {
   // Scan process.argv for all --patch values.
-  const ids = [];
-  const argv = process.argv;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--patch' && i + 1 < argv.length) {
-      ids.push(argv[i + 1]);
-      i += 1;
-    }
-  }
+  const ids = collectFlagIds('--patch');
   // Fallback: if we couldn't read from argv (e.g., test runner), use cmdOpts.patch.
   if (ids.length === 0 && cmdOpts.patch) {
     return Array.isArray(cmdOpts.patch) ? cmdOpts.patch : [cmdOpts.patch];
+  }
+  return ids;
+}
+
+/**
+ * Generic argv scanner for repeated flag values. Commander v12 stores only
+ * the last value of a non-variadic `.option(<flag>)`; `--patch a --patch b`
+ * yields `cmdOpts.patch === 'b'` rather than `['a','b']`. Scanning argv is
+ * the simplest and lowest-risk way to recover every occurrence without
+ * adding a custom parser.
+ *
+ * @param {string} flagName  - e.g. "--patch" or "--transform"
+ * @returns {string[]}
+ */
+function collectFlagIds(flagName) {
+  const ids = [];
+  const argv = process.argv;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === flagName && i + 1 < argv.length) {
+      ids.push(argv[i + 1]);
+      i += 1;
+    }
   }
   return ids;
 }
@@ -196,8 +222,17 @@ async function rebuildAction(packagePath, cmdOpts, deps) {
   const mode = cmdOpts.mode || 'safe';
   const standard = cmdOpts.standard || 'wcag22';
 
-  // Deferred-tier short-circuit: print notice and exit 0 without touching disk.
-  if (mode === 'assisted' || mode === 'full') {
+  // Tier dispatch:
+  //   safe     — handled below (v4 path).
+  //   assisted — still a deferred-feature stub at the CLI level until v4.1
+  //              wires its assisted-tier action. Behaviour unchanged here.
+  //   full     — v5. Two sub-paths:
+  //              1. checkpoint mode (default): rebuild() stages output under
+  //                 .rebuild-staging/, the CLI renders preview, prints the
+  //                 approval instruction, and exits 0.
+  //              2. --no-checkpoint: rebuild() writes inline to packageDir;
+  //                 verification runs and the v4 exit-code contract applies.
+  if (mode === 'assisted') {
     console.log(
       kleur.yellow(
         `[rebuild] mode=${mode} is a deferred feature (v4.1/v5). ` +
@@ -205,6 +240,9 @@ async function rebuildAction(packagePath, cmdOpts, deps) {
       )
     );
     return doExit(0);
+  }
+  if (mode === 'full') {
+    return await runFullTierRebuild(packagePath, cmdOpts, d, doExit);
   }
 
   // Resolve engagement + per-package output directory.
@@ -409,6 +447,223 @@ async function rebuildAction(packagePath, cmdOpts, deps) {
 }
 
 /**
+ * v5 full-tier rebuild path. Runs rebuild() with the appropriate
+ * `noCheckpoint` flag and writes the corresponding artifacts.
+ *
+ * Checkpoint-on (default): rebuild() stages output under
+ *   <packageDir>/.rebuild-staging/. The CLI renders the preview into the
+ *   staging dir and prints the approve instruction. Exits 0.
+ *
+ * Checkpoint-off (--no-checkpoint): rebuild() writes inline. The CLI
+ *   verifies and renders diff/summary/preview at the package root and
+ *   exits per the v4 contract (0 if remaining===0, else 1, or 2 on
+ *   regression).
+ *
+ * @param {string} packagePath
+ * @param {Object} cmdOpts
+ * @param {Object} d - resolved dependency map (audit, rebuild, ...)
+ * @param {Function} doExit
+ */
+async function runFullTierRebuild(packagePath, cmdOpts, d, doExit) {
+  const doAudit = d.audit || require('../index').audit;
+  const doRebuild = d.rebuild || require('../rebuild/index').rebuild;
+  const doVerify = d.verify || require('../rebuild/verify').verify;
+  const renderDiff = d.renderRebuildDiff || require('../reporter/rebuild-diff').renderRebuildDiff;
+  const renderSummary = d.renderRebuildSummary || require('../reporter/rebuild-summary').renderRebuildSummary;
+  const renderPreview = d.renderRebuildPreview || require('../reporter/rebuild-preview').renderRebuildPreview;
+  const fsp = d.fsp || fs;
+
+  // Commander's `--no-checkpoint` boolean stores the *positive* form on
+  // cmdOpts.checkpoint: true by default, false when the user passed
+  // `--no-checkpoint`. We translate to `noCheckpoint` for clarity. Default
+  // is checkpoint-on (PRD § "Checkpoint lifecycle"; a worker that flips this
+  // default fails review).
+  const noCheckpoint = cmdOpts.checkpoint === false;
+  const standard = cmdOpts.standard || 'wcag22';
+  const engagementsRoot = cmdOpts.engagementsRoot || './engagements';
+  const packageBaseName = path.basename(packagePath, '.zip');
+  const engagementDir = path.resolve(engagementsRoot, cmdOpts.engagement);
+  const packageDir = path.join(engagementDir, packageBaseName);
+
+  const spinner = ora('Rebuilding package (full-tier)...').start();
+
+  try {
+    await fsp.mkdir(packageDir, { recursive: true });
+
+    // Reuse / run audit (same logic as the safe-tier path).
+    const auditResultsPath = path.join(packageDir, 'results.json');
+    let auditResults = null;
+    try {
+      const [auditStat, inputStat] = await Promise.all([
+        fsp.stat(auditResultsPath),
+        fsp.stat(packagePath)
+      ]);
+      if (auditStat.mtimeMs >= inputStat.mtimeMs) {
+        auditResults = JSON.parse(await fsp.readFile(auditResultsPath, 'utf8'));
+        spinner.info('Reusing existing audit results (results.json is newer than input zip)');
+      } else {
+        spinner.info('Existing results.json is stale — re-running audit');
+      }
+    } catch (_) {
+      spinner.info('No existing audit found — running audit first');
+    }
+
+    if (!auditResults) {
+      spinner.start('Running audit...');
+      const { writeReports } = require('../reporter');
+      const rawAuditResults = await doAudit(packagePath, {
+        standard,
+        packageType: cmdOpts.packageType || 'auto',
+        browser: cmdOpts.browser || 'chromium',
+        timeoutDynamic: cmdOpts.timeoutDynamic ? parseInt(cmdOpts.timeoutDynamic, 10) : 30000,
+        packagePath
+      });
+      await writeReports({
+        scorecard: rawAuditResults.scorecard,
+        violations: rawAuditResults.violations,
+        manualReview: rawAuditResults.manualReview,
+        scos: rawAuditResults.scos,
+        dynamicReport: rawAuditResults.dynamicReport,
+        fixesApplied: rawAuditResults.fixesApplied,
+        options: {
+          output: packageDir,
+          standard,
+          packageType: rawAuditResults.packageType,
+          packagePath,
+          engagementId: cmdOpts.engagement,
+          brandConfigPath: cmdOpts.brandConfig
+        }
+      });
+      auditResults = rawAuditResults;
+      spinner.succeed('Audit complete');
+    }
+
+    // Drive rebuild orchestrator. noCheckpoint defaults false (PRD: gate-on).
+    spinner.start('Applying full-tier transforms...');
+    const rebuildResult = await doRebuild(packagePath, auditResults, {
+      mode: 'full',
+      standard,
+      engagementId: cmdOpts.engagement,
+      packageName: path.basename(packagePath),
+      outputDir: packageDir,
+      noCheckpoint,
+      brandConfigPath: cmdOpts.brandConfig
+    });
+    spinner.succeed(`Full-tier rebuild complete (${(rebuildResult.manifest.patches || []).length} patches)`);
+
+    const brandConfig = await loadBrandConfig(cmdOpts.brandConfig);
+
+    // ---------------------------------------------------------------------
+    // Checkpoint mode (default): outputs are staged. Render the preview into
+    // the staging directory, print the approval instruction, exit 0.
+    // ---------------------------------------------------------------------
+    if (!noCheckpoint) {
+      const stagingDir = rebuildResult.stagingDir || path.join(packageDir, '.rebuild-staging');
+      const previewPath = path.join(stagingDir, 'rebuild-preview.html');
+      try {
+        await renderPreview(rebuildResult.manifest, brandConfig, previewPath);
+      } catch (err) {
+        // A preview-render failure is not fatal — staging is intact and the
+        // operator can re-render on approve. Log and continue.
+        console.error(kleur.yellow(`[rebuild] preview render failed: ${err.message || String(err)}`));
+      }
+      console.log(kleur.green('Full-tier rebuild staged.'));
+      console.log(`  Review at:  ${previewPath}`);
+      console.log(
+        `  Approve with: prism rebuild-checkpoint approve --engagement ${cmdOpts.engagement} --package ${path.basename(packagePath)}`
+      );
+      return doExit(0);
+    }
+
+    // ---------------------------------------------------------------------
+    // No-checkpoint mode: write artifacts inline at the package root, then
+    // verify and exit per the v4 contract.
+    // ---------------------------------------------------------------------
+    const rebuiltZipPath = rebuildResult.rebuiltZipPath;
+    if (!rebuiltZipPath) {
+      // No zip was produced — surface the manifest's deferred entries via
+      // a summary file so the consultant has something to look at.
+      const summaryPath = path.join(packageDir, 'rebuild-summary.html');
+      await renderSummary(rebuildResult.manifest, brandConfig, summaryPath);
+      console.log(kleur.yellow(`[rebuild] mode=full produced no rebuilt zip. Summary: ${summaryPath}`));
+      return doExit(0);
+    }
+
+    // Verify (allowlist only — see carry-forward #1 in module header).
+    spinner.start('Verifying rebuilt package...');
+    const verifyOpts = {
+      standard,
+      packageType: cmdOpts.packageType || 'auto',
+      browser: cmdOpts.browser || 'chromium',
+      timeoutDynamic: cmdOpts.timeoutDynamic ? parseInt(cmdOpts.timeoutDynamic, 10) : 30000,
+      signal: cmdOpts.signal || null
+    };
+    const verifyResult = await doVerify(rebuiltZipPath, auditResults, verifyOpts);
+    rebuildResult.manifest.verification = {
+      before: verifyResult.before,
+      after: verifyResult.after,
+      resolved: verifyResult.resolved,
+      introduced: verifyResult.introduced,
+      remaining: verifyResult.remaining
+    };
+    spinner.succeed('Verification complete');
+
+    const manifestPath = path.join(packageDir, 'rebuild-manifest.json');
+    const diffPath = path.join(packageDir, 'rebuild-diff.html');
+    const summaryPath = path.join(packageDir, 'rebuild-summary.html');
+    const previewPath = path.join(packageDir, 'rebuild-preview.html');
+    const outputZipPath = path.join(packageDir, 'rebuilt.zip');
+
+    if (verifyResult.hasRegression) {
+      console.error(kleur.red(
+        `[rebuild] REGRESSION: re-audit introduced ${verifyResult.introduced} new finding(s). ` +
+        `rebuilt.zip will NOT be written.`
+      ));
+      const { validateManifest } = require('../rebuild/manifest');
+      const validation = validateManifest(rebuildResult.manifest);
+      if (validation.valid) {
+        await fsp.writeFile(manifestPath, JSON.stringify(rebuildResult.manifest, null, 2), 'utf8');
+      }
+      await renderSummary(rebuildResult.manifest, brandConfig, summaryPath);
+      console.error(kleur.red(`Manifest: ${manifestPath}`));
+      console.error(kleur.red(`Summary:  ${summaryPath}`));
+      return doExit(2);
+    }
+
+    spinner.start('Writing artifacts...');
+    await renderDiff(rebuildResult.manifest, brandConfig, diffPath);
+    await renderSummary(rebuildResult.manifest, brandConfig, summaryPath);
+    try {
+      await renderPreview(rebuildResult.manifest, brandConfig, previewPath);
+    } catch (err) {
+      console.error(kleur.yellow(`[rebuild] preview render failed: ${err.message || String(err)}`));
+    }
+    await fsp.copyFile(rebuiltZipPath, outputZipPath);
+    const { validateManifest: validate } = require('../rebuild/manifest');
+    const valid = validate(rebuildResult.manifest);
+    if (!valid.valid) {
+      throw new Error(`Cannot write invalid manifest: ${valid.errors.join('; ')}`);
+    }
+    await fsp.writeFile(manifestPath, JSON.stringify(rebuildResult.manifest, null, 2), 'utf8');
+    spinner.succeed('Artifacts written');
+
+    const v = rebuildResult.manifest.verification;
+    console.log(kleur.green(`Resolved: ${v.resolved} | Remaining: ${v.remaining} | Introduced: ${v.introduced}`));
+    console.log(`rebuilt.zip:            ${outputZipPath}`);
+    console.log(`rebuild-manifest.json:  ${manifestPath}`);
+    console.log(`rebuild-diff.html:      ${diffPath}`);
+    console.log(`rebuild-summary.html:   ${summaryPath}`);
+    console.log(`rebuild-preview.html:   ${previewPath}`);
+
+    return doExit(v.remaining === 0 ? 0 : 1);
+  } catch (err) {
+    spinner.stop();
+    console.error(kleur.red(`Fatal rebuild error: ${err.message}`));
+    return doExit(2);
+  }
+}
+
+/**
  * Register the `rebuild` subcommand on `program`.
  *
  * NOTE: --standard defaults to wcag22 here (the rebuild target). This is
@@ -425,8 +680,9 @@ function registerRebuild(program, deps) {
       'Produces rebuilt.zip, rebuild-manifest.json, rebuild-diff.html, and rebuild-summary.html.'
     )
     .requiredOption('--engagement <id>', 'Engagement ID (required)')
-    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted/full are deferred in v4)', 'safe')
+    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted is deferred to v4.1)', 'safe')
     .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag22 — rebuild target; differs from audit default)', 'wcag22')
+    .option('--no-checkpoint', 'Skip the checkpoint gate and write directly to rebuilt.zip. Default off; the checkpoint gate is on by default for full mode.')
     .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
     .option('--browser <browser>', 'Browser for dynamic checks: chromium|firefox|webkit (default: chromium)', 'chromium')
     .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
@@ -533,8 +789,9 @@ function registerRebuildLibrary(program, deps) {
       'Produces per-package artifacts and a _rebuild-rollup.{html,md} at the engagement level.'
     )
     .requiredOption('--engagement <id>', 'Engagement ID (required)')
-    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted/full are deferred in v4)', 'safe')
+    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted is deferred to v4.1)', 'safe')
     .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag22 — rebuild target; differs from audit default)', 'wcag22')
+    .option('--no-checkpoint', 'Skip the checkpoint gate and write directly to rebuilt.zip. Default off; the checkpoint gate is on by default for full mode.')
     .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
     .option('--browser <browser>', 'Browser for dynamic checks: chromium|firefox|webkit (default: chromium)', 'chromium')
     .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')

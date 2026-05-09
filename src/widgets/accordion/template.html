@@ -1,0 +1,68 @@
+<!--
+  Prism widget: Accordion
+  APG pattern: Disclosure (Show/Hide) — repeated, ARIA-compliant accordion
+  Placeholders:
+    {{headingLevel}}   - heading level used for each accordion header (e.g. "h3"). Default: "h3".
+    {{headerId.N}}     - unique id for header N
+    {{panelId.N}}      - unique id for panel N
+    {{headerLabel.N}}  - visible header label (plain text)
+    {{panelHTML.N}}    - panel body HTML (sanitized upstream)
+    {{expanded.N}}     - "true" or "false" (default "false")
+  Repeat the [data-prism-section] block once per section.
+-->
+<div class="prism-widget-accordion" data-prism-widget="accordion">
+  <div class="prism-widget-accordion__section" data-prism-section>
+    <h3 class="prism-widget-accordion__heading">
+      <button
+        type="button"
+        class="prism-widget-accordion__trigger"
+        id="{{headerId.0}}"
+        aria-controls="{{panelId.0}}"
+        aria-expanded="false"
+        data-prism-trigger
+      >
+        <span class="prism-widget-accordion__label">{{headerLabel.0}}</span>
+        <span class="prism-widget-accordion__chevron" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="12" height="12" focusable="false">
+            <path d="M3 5l5 6 5-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </button>
+    </h3>
+    <div
+      class="prism-widget-accordion__panel"
+      id="{{panelId.0}}"
+      role="region"
+      aria-labelledby="{{headerId.0}}"
+      hidden
+      data-prism-panel
+    >{{panelHTML.0}}</div>
+  </div>
+  <div class="prism-widget-accordion__section" data-prism-section>
+    <h3 class="prism-widget-accordion__heading">
+      <button
+        type="button"
+        class="prism-widget-accordion__trigger"
+        id="{{headerId.1}}"
+        aria-controls="{{panelId.1}}"
+        aria-expanded="false"
+        data-prism-trigger
+      >
+        <span class="prism-widget-accordion__label">{{headerLabel.1}}</span>
+        <span class="prism-widget-accordion__chevron" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="12" height="12" focusable="false">
+            <path d="M3 5l5 6 5-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </button>
+    </h3>
+    <div
+      class="prism-widget-accordion__panel"
+      id="{{panelId.1}}"
+      role="region"
+      aria-labelledby="{{headerId.1}}"
+      hidden
+      data-prism-panel
+    >{{panelHTML.1}}</div>
+  </div>
+</div>

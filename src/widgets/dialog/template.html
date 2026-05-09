@@ -1,0 +1,56 @@
+<!--
+  Prism widget: Dialog (modal)
+  APG pattern: Dialog (Modal)
+  Placeholders:
+    {{dialogId}}      - unique id for the dialog element
+    {{titleId}}       - unique id for the title element (referenced by aria-labelledby)
+    {{descId}}        - unique id for the description (optional, referenced by aria-describedby)
+    {{title}}         - plain-text dialog title
+    {{descHTML}}      - description HTML (sanitized upstream; can be empty)
+    {{contentHTML}}   - main dialog body (sanitized upstream)
+    {{closeLabel}}    - accessible label for the close button (default "Close dialog")
+    {{triggerLabel}}  - text for the launcher button (the page-side trigger)
+  The .prism-widget-dialog__trigger element opens the dialog.
+  The .prism-widget-dialog element is hidden by default and shown via script.
+-->
+<div class="prism-widget-dialog-host" data-prism-widget="dialog">
+  <button
+    type="button"
+    class="prism-widget-dialog__trigger"
+    aria-haspopup="dialog"
+    aria-controls="{{dialogId}}"
+    data-prism-trigger
+  >{{triggerLabel}}</button>
+  <div
+    class="prism-widget-dialog__backdrop"
+    hidden
+    data-prism-backdrop
+  ></div>
+  <div
+    class="prism-widget-dialog"
+    id="{{dialogId}}"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="{{titleId}}"
+    aria-describedby="{{descId}}"
+    tabindex="-1"
+    hidden
+    data-prism-dialog
+  >
+    <div class="prism-widget-dialog__header">
+      <h2 class="prism-widget-dialog__title" id="{{titleId}}">{{title}}</h2>
+      <button
+        type="button"
+        class="prism-widget-dialog__close"
+        aria-label="{{closeLabel}}"
+        data-prism-close
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" focusable="false" aria-hidden="true">
+          <path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <p class="prism-widget-dialog__desc" id="{{descId}}">{{descHTML}}</p>
+    <div class="prism-widget-dialog__body">{{contentHTML}}</div>
+  </div>
+</div>
