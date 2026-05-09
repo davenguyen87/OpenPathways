@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { estimateCostUsd, PRICING, lookupPricing } = require('../server/lib/llm-cost.js');
+const { estimateCostUsd, PRICING, lookupPricing, OPENROUTER_MARKUP } = require('../server/lib/llm-cost.js');
 
 describe('PRICING table', () => {
   it('contains entries for all three supported models', () => {
@@ -144,5 +144,92 @@ describe('estimateCostUsd', () => {
     });
     expect(typeof cost).toBe('number');
     expect(cost).toBeGreaterThanOrEqual(0);
+  });
+
+  it('defaults to anthropic provider (no markup) when provider is omitted', () => {
+    const direct = estimateCostUsd({
+      model: 'claude-haiku-4-5',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    // Haiku: $1 + $5 = $6 — no markup
+    expect(direct).toBeCloseTo(6.0, 6);
+  });
+
+  it('applies OPENROUTER_MARKUP when provider="openrouter"', () => {
+    const direct = estimateCostUsd({
+      model: 'claude-haiku-4-5',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const via = estimateCostUsd({
+      model: 'claude-haiku-4-5',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      provider: 'openrouter',
+    });
+    expect(via).toBeCloseTo(direct * OPENROUTER_MARKUP, 6);
+  });
+
+  it('OpenRouter cost is ~5% more than Anthropic-direct cost', () => {
+    const direct = estimateCostUsd({
+      model: 'claude-haiku-4-5',
+      inputTokens: 500_000,
+      outputTokens: 250_000,
+    });
+    const via = estimateCostUsd({
+      model: 'claude-haiku-4-5',
+      inputTokens: 500_000,
+      outputTokens: 250_000,
+      provider: 'openrouter',
+    });
+    expect(via / direct).toBeCloseTo(1.05, 4);
+  });
+
+  it('OpenRouter with anthropic-prefixed model resolves correct pricing', () => {
+    const prefixed = estimateCostUsd({
+      model: 'anthropic/claude-haiku-4-5',
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      provider: 'openrouter',
+    });
+    // Should use Haiku input price ($1) × OPENROUTER_MARKUP
+    expect(prefixed).toBeCloseTo(1.0 * OPENROUTER_MARKUP, 6);
+  });
+});
+
+describe('OPENROUTER_MARKUP', () => {
+  it('is exported', () => {
+    expect(OPENROUTER_MARKUP).toBeDefined();
+  });
+
+  it('equals 1.05 (5% gateway fee)', () => {
+    expect(OPENROUTER_MARKUP).toBe(1.05);
+  });
+});
+
+describe('lookupPricing — OpenRouter-prefixed models', () => {
+  it('finds Haiku by anthropic/claude-haiku-4-5', () => {
+    const p = lookupPricing('anthropic/claude-haiku-4-5');
+    expect(p).not.toBeNull();
+    expect(p.inputPer1M).toBe(1);
+    expect(p.outputPer1M).toBe(5);
+  });
+
+  it('finds Sonnet by anthropic/claude-sonnet-4-6', () => {
+    const p = lookupPricing('anthropic/claude-sonnet-4-6');
+    expect(p).not.toBeNull();
+    expect(p.inputPer1M).toBe(3);
+  });
+
+  it('finds Haiku by anthropic/claude-haiku-4-5-20250305 (date-suffixed)', () => {
+    const p = lookupPricing('anthropic/claude-haiku-4-5-20250305');
+    expect(p).not.toBeNull();
+    expect(p.inputPer1M).toBe(1);
+  });
+
+  it('returns null for openai/gpt-4o (unknown model after stripping prefix)', () => {
+    const p = lookupPricing('openai/gpt-4o');
+    expect(p).toBeNull();
   });
 });

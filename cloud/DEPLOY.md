@@ -250,9 +250,9 @@ tab. Off by default; setting `LLM_PROVIDER` is the switch.
 
 | Var | Default | Notes |
 | --- | ------- | ----- |
-| `LLM_PROVIDER` | — (off) | Set to `anthropic` to activate v3.1 narrative on every audit. When unset, reports are generated without the narrative section — no error, no fallback noise. |
-| `LLM_KEY_FROM_ENV` | — | Name of the env var that holds the API key. Required when `LLM_PROVIDER` is set. Example: `ANTHROPIC_API_KEY`. The actual key must also be present as a separate env var under that name. |
-| `LLM_MODEL` | `claude-haiku-4-5` | Override the provider's default model. Use `claude-sonnet-4-6` for higher-quality narrative at approximately 3× the token cost. |
+| `LLM_PROVIDER` | — (off) | Accepted values: `anthropic` (direct), `openrouter` (gateway, +5% markup). When unset, reports are generated without the narrative section — no error, no fallback noise. |
+| `LLM_KEY_FROM_ENV` | — | Name of the env var that holds the API key. Required when `LLM_PROVIDER` is set. Example: `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`. The actual key must also be present as a separate env var under that name. |
+| `LLM_MODEL` | `claude-haiku-4-5` | Override the provider's default model. Use `claude-sonnet-4-6` for higher-quality narrative at approximately 3× the token cost. Bare alias (`claude-haiku-4-5`) works for both providers; auto-prefixed to `anthropic/claude-haiku-4-5` when `LLM_PROVIDER=openrouter`. |
 | `ANTHROPIC_API_KEY` (or the name you set in `LLM_KEY_FROM_ENV`) | — | The actual API key. If missing when `LLM_PROVIDER` is set, the narrative generation falls back to the no-LLM path gracefully — the report still produces, without an error. |
 
 **Cost guidance.** At the Haiku 4.5 default with standard token budgets:
@@ -262,6 +262,32 @@ tab. Off by default; setting `LLM_PROVIDER` is the switch.
 Switching to `claude-sonnet-4-6` multiplies cost roughly 3×.
 
 **Server-env applies a single key to every audit on the deployment.** Per-workspace BYO keys with per-user on/off control and a token-spend dashboard are now live (Phase 12.5, shipped 2026-05-08) — see § "LLM features: per-workspace keys" above. Server-env activation remains supported for deployments where a single shared key is preferred.
+
+### OpenRouter (alternative provider)
+
+OpenRouter routes requests to the same Claude models via a gateway. Reasons to use it:
+consolidated billing across providers, organizational policy, or easier key rotation.
+
+Tradeoff: Anthropic's published rates + ~5% gateway markup. For a 200-package library audit
+that costs ~$11 on Anthropic direct, OpenRouter is ~$11.55.
+
+Env vars (set in Coolify → Application → Environment, on both `web` and `worker`):
+
+```
+LLM_PROVIDER=openrouter
+LLM_KEY_FROM_ENV=OPENROUTER_API_KEY
+OPENROUTER_API_KEY=sk-or-v1-...
+LLM_MODEL=claude-haiku-4-5
+```
+
+Optional:
+
+| Var | Default | Notes |
+| --- | ------- | ----- |
+| `OPENROUTER_REFERER` | `https://prism.skill-loop.com` | HTTP Referer header sent to OpenRouter, used for usage attribution in their dashboard. |
+
+Per-workspace OpenRouter keys work the same way as Anthropic keys — users enter `sk-or-v1-...`
+in the Settings page. The provider picker in `/settings` exposes both options.
 
 ---
 

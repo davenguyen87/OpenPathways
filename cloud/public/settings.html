@@ -70,18 +70,6 @@
       outline: 2px solid var(--focus);
       outline-offset: 2px;
     }
-    .provider-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-      padding: 0.25rem 0.75rem;
-      border-radius: 99px;
-      background: var(--accent-soft);
-      color: var(--accent-ink);
-      border: 1px solid var(--rule);
-    }
     .current-key-hint {
       font-size: 0.8125rem;
       color: var(--ink-3);
@@ -159,12 +147,18 @@
       <h2>LLM API key</h2>
 
       <div class="field-group">
-        <!-- Provider — locked to Anthropic in v1 -->
+        <!-- Provider picker -->
         <div class="field-row">
-          <label id="provider-label">Provider</label>
-          <div aria-labelledby="provider-label">
-            <span class="provider-pill" role="img" aria-label="Anthropic (only provider available)">Anthropic</span>
-          </div>
+          <label for="provider-select">Provider</label>
+          <select id="provider-select" name="provider">
+            <option value="anthropic">Anthropic (direct)</option>
+            <option value="openrouter">OpenRouter (gateway, ~5% markup)</option>
+          </select>
+          <span class="current-key-hint" style="margin-top:0.35rem">
+            Anthropic direct: API key from console.anthropic.com.
+            OpenRouter: API key from openrouter.ai (sk-or-v1-...).
+            Same Claude models, OpenRouter adds a ~5% gateway fee.
+          </span>
         </div>
 
         <!-- API key -->
@@ -176,13 +170,13 @@
             name="apiKey"
             autocomplete="off"
             spellcheck="false"
-            placeholder="sk-..."
+            placeholder="sk-... (your API key)"
             aria-describedby="api-key-hint"
           >
           <span class="current-key-hint" id="api-key-hint" role="status" aria-live="polite"></span>
         </div>
 
-        <!-- Model picker -->
+        <!-- Model picker — values are swapped by settings.js when provider changes -->
         <div class="field-row">
           <label for="model-select">Model</label>
           <select id="model-select" name="model">

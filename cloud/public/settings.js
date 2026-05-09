@@ -1,33 +1,43 @@
 /**
- * settings.js — Workspace LLM key management page.
- *
- * Standalone module; no dependency on app.js.
- * Loads the current config on DOMContentLoaded, then wires Save / Test / Delete.
- *
- * CSRF: reads the XSRF-TOKEN cookie (set by the server on every page load in
- * hosted mode) and sends it as the x-csrf-token header on state-changing requests.
+ * settings.js — Workspace LLM key management.
+ * Standalone; no dependency on app.js.
+ * Provider model values: anthropic → bare alias; openrouter → anthropic/<alias>.
+ * CSRF: reads XSRF-TOKEN cookie; sends as x-csrf-token on state-changing requests.
  */
 (function () {
   'use strict';
 
+  var MODEL_DEFS = {
+    anthropic:  [
+      { value: 'claude-haiku-4-5',             label: 'claude-haiku-4-5 (default — fast & affordable)' },
+      { value: 'claude-sonnet-4-6',            label: 'claude-sonnet-4-6 (balanced)' },
+      { value: 'claude-opus-4-7',              label: 'claude-opus-4-7 (most capable)' },
+    ],
+    openrouter: [
+      { value: 'anthropic/claude-haiku-4-5',   label: 'claude-haiku-4-5 (default — fast & affordable)' },
+      { value: 'anthropic/claude-sonnet-4-6',  label: 'claude-sonnet-4-6 (balanced)' },
+      { value: 'anthropic/claude-opus-4-7',    label: 'claude-opus-4-7 (most capable)' },
+    ],
+  };
+
   // ─── Element refs ───────────────────────────────────────────────────────────
-  var apiKeyInput  = document.getElementById('api-key-input');
-  var modelSelect  = document.getElementById('model-select');
-  var keyHint      = document.getElementById('api-key-hint');
-  var statusArea   = document.getElementById('status-area');
-  var saveBtn      = document.getElementById('save-btn');
-  var testBtn      = document.getElementById('test-btn');
-  var deleteBtn    = document.getElementById('delete-btn');
+  var providerSelect = document.getElementById('provider-select');
+  var apiKeyInput    = document.getElementById('api-key-input');
+  var modelSelect    = document.getElementById('model-select');
+  var keyHint        = document.getElementById('api-key-hint');
+  var statusArea     = document.getElementById('status-area');
+  var saveBtn        = document.getElementById('save-btn');
+  var testBtn        = document.getElementById('test-btn');
+  var deleteBtn      = document.getElementById('delete-btn');
 
   // Topbar user/logout (mirrors app.js pattern; optional — page works without auth).
-  var topbarUser   = document.getElementById('topbar-user');
+  var topbarUser     = document.getElementById('topbar-user');
   var topbarSettings = document.getElementById('topbar-settings');
-  var logoutBtn    = document.getElementById('topbar-logout');
+  var logoutBtn      = document.getElementById('topbar-logout');
 
   // ─── CSRF helper ────────────────────────────────────────────────────────────
 
   function getCsrfToken() {
-    // Read XSRF-TOKEN cookie (double-submit cookie pattern used by csrf-csrf).
     try {
       var match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
       return match ? decodeURIComponent(match[1]) : '';
@@ -42,7 +52,6 @@
   // ─── Status helpers ─────────────────────────────────────────────────────────
 
   function showStatus(msg, type) {
-    // type: 'ok' | 'err' | 'pending'
     statusArea.className = 'status-area status-' + (type || 'pending');
     statusArea.textContent = msg;
   }
@@ -58,6 +67,31 @@
     deleteBtn.disabled = disabled;
   }
 
+  // ─── Provider / model sync ───────────────────────────────────────────────────
+
+  // Rebuild <option> elements for provider; restore by preferredValue or prior index.
+  function syncModelOptions(provider, preferredValue) {
+    if (!modelSelect) return;
+    var defs = MODEL_DEFS[provider] || MODEL_DEFS['anthropic'];
+    var currentIdx = modelSelect.selectedIndex >= 0 ? modelSelect.selectedIndex : 0;
+    modelSelect.innerHTML = '';
+    defs.forEach(function (def) {
+      var opt = document.createElement('option');
+      opt.value = def.value;
+      opt.textContent = def.label;
+      modelSelect.appendChild(opt);
+    });
+    if (preferredValue) {
+      var matched = modelSelect.querySelector('option[value="' + preferredValue + '"]');
+      if (matched) { modelSelect.value = preferredValue; return; }
+    }
+    modelSelect.selectedIndex = Math.min(currentIdx, defs.length - 1);
+  }
+
+  function currentProvider() {
+    return providerSelect ? providerSelect.value : 'anthropic';
+  }
+
   // ─── Load current config ────────────────────────────────────────────────────
 
   function loadConfig() {
@@ -66,25 +100,32 @@
       .then(function (data) {
         if (data.hasKey) {
           keyHint.textContent = 'Current key: sk-…' + data.keyLast4;
-          if (data.model && modelSelect) {
-            // Try to select the stored model.
-            var opt = modelSelect.querySelector('option[value="' + data.model + '"]');
-            if (opt) modelSelect.value = data.model;
+
+          // Select the stored provider first so syncModelOptions uses the right defs.
+          if (data.provider && providerSelect) {
+            var opt = providerSelect.querySelector('option[value="' + data.provider + '"]');
+            if (opt) providerSelect.value = data.provider;
           }
+
+          // Rebuild model options for the stored provider, selecting the stored model.
+          syncModelOptions(currentProvider(), data.model || null);
         } else {
           keyHint.textContent = 'No key stored yet.';
+          syncModelOptions(currentProvider(), null);
         }
       })
       .catch(function () {
         keyHint.textContent = '';
+        syncModelOptions(currentProvider(), null);
       });
   }
 
   // ─── Save ────────────────────────────────────────────────────────────────────
 
   function handleSave() {
-    var apiKey = apiKeyInput.value.trim();
-    var model  = modelSelect ? modelSelect.value : 'claude-haiku-4-5';
+    var provider = currentProvider();
+    var apiKey   = apiKeyInput.value.trim();
+    var model    = modelSelect ? modelSelect.value : MODEL_DEFS[provider][0].value;
 
     if (!apiKey) {
       showStatus('Enter an API key before saving.', 'err');
@@ -102,14 +143,12 @@
       method: 'PUT',
       credentials: 'same-origin',
       headers: Object.assign({ 'Content-Type': 'application/json' }, csrfHeaders()),
-      body: JSON.stringify({ provider: 'anthropic', model: model, apiKey: apiKey }),
+      body: JSON.stringify({ provider: provider, model: model, apiKey: apiKey }),
     })
       .then(function (r) {
         if (r.status === 204) {
           showStatus('✓ Saved', 'ok');
-          // Update the hint to show the new last-4.
-          var last4 = apiKey.slice(-4);
-          keyHint.textContent = 'Current key: sk-…' + last4;
+          keyHint.textContent = 'Current key: sk-…' + apiKey.slice(-4);
           apiKeyInput.value = '';
         } else {
           return r.json().then(function (body) {
@@ -128,8 +167,10 @@
   // ─── Test ────────────────────────────────────────────────────────────────────
 
   function handleTest() {
-    var apiKey = apiKeyInput.value.trim();
-    var body = apiKey ? { apiKey: apiKey } : {};
+    var apiKey   = apiKeyInput.value.trim();
+    var provider = currentProvider();
+    // Include provider so /test can use the right engine when testing before save.
+    var body = apiKey ? { apiKey: apiKey, provider: provider } : { provider: provider };
 
     setButtonsDisabled(true);
     showStatus('Testing…', 'pending');
@@ -224,6 +265,14 @@
   document.addEventListener('DOMContentLoaded', function () {
     loadConfig();
     loadUser();
+
+    // When provider changes, rebuild model options and reset model to Haiku.
+    if (providerSelect) {
+      providerSelect.addEventListener('change', function () {
+        syncModelOptions(currentProvider(), null);
+        clearStatus();
+      });
+    }
 
     if (saveBtn)   saveBtn.addEventListener('click', handleSave);
     if (testBtn)   testBtn.addEventListener('click', handleTest);

@@ -12,6 +12,9 @@
 
 'use strict';
 
+// OpenRouter charges Anthropic's published rates plus a ~5% gateway fee.
+const OPENROUTER_MARKUP = 1.05;
+
 // Pricing per 1M tokens: { inputPer1M, outputPer1M }
 const PRICING = {
   'claude-haiku-4-5':  { inputPer1M: 1,  outputPer1M: 5  },
@@ -43,18 +46,31 @@ function lookupPricing(model) {
     if (normalized.startsWith(alias)) return PRICING[alias];
   }
 
+  // OpenRouter-prefixed model strings (e.g. "anthropic/claude-haiku-4-5").
+  // Strip everything up to and including the last "/" and retry.
+  if (normalized.includes('/')) {
+    const afterSlash = normalized.slice(normalized.lastIndexOf('/') + 1);
+    if (PRICING[afterSlash]) return PRICING[afterSlash];
+    for (const alias of PRICING_ALIASES) {
+      if (afterSlash.startsWith(alias)) return PRICING[alias];
+    }
+  }
+
   return null;
 }
 
 /**
  * Estimate the cost of an LLM call in USD.
  *
- * @param {{ model: string, inputTokens: number, outputTokens: number }} opts
+ * @param {{ model: string, inputTokens: number, outputTokens: number, provider?: string }} opts
+ * @param {string} [opts.provider='anthropic']  Provider name. Pass 'openrouter' to apply
+ *                                              the OPENROUTER_MARKUP gateway fee.
  * @returns {number} Estimated cost in USD (may be 0.0 for very small calls).
  */
-function estimateCostUsd({ model, inputTokens, outputTokens }) {
+function estimateCostUsd({ model, inputTokens, outputTokens, provider = 'anthropic' }) {
   const pricing = lookupPricing(model);
 
+  let baseCost;
   if (!pricing) {
     // Unknown model — warn and use Haiku pricing as a safe lower bound so we
     // never over-charge in the telemetry display.
@@ -62,16 +78,16 @@ function estimateCostUsd({ model, inputTokens, outputTokens }) {
       `[llm-cost] unknown model "${model}"; using Haiku pricing as lower bound`
     );
     const fallback = PRICING['claude-haiku-4-5'];
-    return (
+    baseCost =
       ((inputTokens || 0) / 1_000_000) * fallback.inputPer1M +
-      ((outputTokens || 0) / 1_000_000) * fallback.outputPer1M
-    );
+      ((outputTokens || 0) / 1_000_000) * fallback.outputPer1M;
+  } else {
+    baseCost =
+      ((inputTokens || 0) / 1_000_000) * pricing.inputPer1M +
+      ((outputTokens || 0) / 1_000_000) * pricing.outputPer1M;
   }
 
-  return (
-    ((inputTokens || 0) / 1_000_000) * pricing.inputPer1M +
-    ((outputTokens || 0) / 1_000_000) * pricing.outputPer1M
-  );
+  return provider === 'openrouter' ? baseCost * OPENROUTER_MARKUP : baseCost;
 }
 
-module.exports = { estimateCostUsd, PRICING, lookupPricing };
+module.exports = { estimateCostUsd, PRICING, lookupPricing, OPENROUTER_MARKUP };

@@ -17,7 +17,7 @@
 const crypto = require('crypto');
 const { getProvider } = require('./llm-provider');
 
-const SUPPORTED_PROVIDERS = ['anthropic', 'openai', 'azure-openai'];
+const SUPPORTED_PROVIDERS = ['anthropic', 'openrouter', 'openai', 'azure-openai'];
 
 /**
  * Check if LLM assistance is enabled.

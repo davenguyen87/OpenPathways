@@ -16,7 +16,9 @@ const express = require('express');
 const { encrypt, decrypt, getDataEncryptionKey, redactKey } = require('../lib/crypto');
 const llmProvider = require('../../../src/lib/llm-provider');
 
-const SUPPORTED_PROVIDERS = ['anthropic'];
+// Both Anthropic keys (sk-ant-...) and OpenRouter keys (sk-or-v1-...) start
+// with 'sk-', so the existing prefix check accepts both without modification.
+const SUPPORTED_PROVIDERS = ['anthropic', 'openrouter'];
 const MIN_API_KEY_LENGTH = 20;
 const TEST_TIMEOUT_MS = 15000;
 
@@ -125,30 +127,41 @@ function createWorkspaceRouter({ store, config, requireAuth, csrfProtect }) {
 
   // ------------------------------------------------------------------
   // POST /api/workspace/llm-config/test
-  // Body: { apiKey? }  — if absent, uses the stored encrypted key.
+  // Body: { apiKey?, provider? }  — if apiKey absent, uses the stored encrypted key.
+  //   provider in body is only used when apiKey is also in body (test-before-save).
+  //   When testing a stored key, provider and model are read from stored config.
   // Returns: { ok: true, latencyMs } or { ok: false, error: '<safe message>' }
   // Hard timeout: 15s.
   // ------------------------------------------------------------------
   router.post('/workspace/llm-config/test', ...auth, async (req, res) => {
     let plaintextKey;
+    let resolvedProvider;
+    let resolvedModel;
 
-    const bodyKey = (req.body || {}).apiKey;
+    const bodyKey      = (req.body || {}).apiKey;
+    const bodyProvider = (req.body || {}).provider;
 
     if (bodyKey) {
       // Caller provided a key in the body — use it directly (for "Test before Save").
       if (typeof bodyKey !== 'string' || !bodyKey.startsWith('sk-') || bodyKey.length < MIN_API_KEY_LENGTH) {
         return res.status(400).json({ ok: false, error: 'Provided apiKey is invalid' });
       }
-      plaintextKey = bodyKey;
+      plaintextKey     = bodyKey;
+      // Use the body provider if it's a supported one, else default to anthropic.
+      resolvedProvider = SUPPORTED_PROVIDERS.includes(bodyProvider) ? bodyProvider : 'anthropic';
+      // Default model per provider.
+      resolvedModel    = resolvedProvider === 'openrouter' ? 'anthropic/claude-haiku-4-5' : 'claude-haiku-4-5';
     } else {
-      // No key in body — decrypt the stored key.
+      // No key in body — decrypt the stored key and read stored provider/model.
       try {
         const cfg = await store.getWorkspaceLlmConfig(userId(req));
         if (!cfg || !cfg.encryptedApiKey) {
           return res.status(400).json({ ok: false, error: 'No API key configured for this workspace' });
         }
-        const dek = getDataEncryptionKey();
-        plaintextKey = decrypt(cfg.encryptedApiKey, dek);
+        const dek    = getDataEncryptionKey();
+        plaintextKey     = decrypt(cfg.encryptedApiKey, dek);
+        resolvedProvider = cfg.provider || 'anthropic';
+        resolvedModel    = cfg.model    || (resolvedProvider === 'openrouter' ? 'anthropic/claude-haiku-4-5' : 'claude-haiku-4-5');
       } catch (err) {
         return res.status(500).json({ ok: false, error: 'Failed to retrieve stored key' });
       }
@@ -157,7 +170,7 @@ function createWorkspaceRouter({ store, config, requireAuth, csrfProtect }) {
     // Run a minimal generation with a hard 15s timeout.
     const t0 = Date.now();
     try {
-      const provider = llmProvider.getProvider('anthropic', plaintextKey, { model: 'claude-haiku-4-5' });
+      const provider = llmProvider.getProvider(resolvedProvider, plaintextKey, { model: resolvedModel });
 
       // Race the generate call against a 15-second timeout.
       await Promise.race([

@@ -7,10 +7,42 @@ reports when `LLM_PROVIDER` and friends are set at the server level.
 
 ## Prereqs
 
-- Anthropic API key with at least $5 remaining budget
+- Anthropic API key (from console.anthropic.com) with at least $5 remaining budget,
+  OR an OpenRouter API key (from openrouter.ai) — see **Alternative: OpenRouter** below.
 - Coolify access to the Prism deployment (admin panel, env var editor)
 - Test fixture: `test/fixtures/scorm12-violations.zip` from the repo root
   (download from the repo or `scp` to your machine — it's ~12 KB)
+
+---
+
+## Alternative: OpenRouter
+
+OpenRouter is a gateway that routes requests to the same Claude models using Anthropic's own
+infrastructure. Reasons to prefer it: consolidated billing across providers, organizational
+policy, or easier provider failover without rotating Anthropic keys.
+
+Tradeoff: OpenRouter charges Anthropic's published rates plus a ~5% gateway markup. Functionally
+identical to direct access — same models, same context windows, same output quality.
+
+To use OpenRouter instead of a direct Anthropic key, set these env vars in place of the
+Anthropic ones:
+
+```
+LLM_PROVIDER=openrouter
+LLM_KEY_FROM_ENV=OPENROUTER_API_KEY
+OPENROUTER_API_KEY=sk-or-v1-...
+LLM_MODEL=claude-haiku-4-5
+```
+
+> `LLM_MODEL` accepts the bare alias (`claude-haiku-4-5`); the engine auto-prefixes it to
+> `anthropic/claude-haiku-4-5` when the provider is `openrouter`. No code change needed.
+
+Optional: set `OPENROUTER_REFERER` to a URL identifying your deployment. Defaults to
+`https://prism.skill-loop.com` if unset (the engine sets this).
+
+The rest of this runbook — configure, verify in cloud, verify cost, rollback — applies
+identically. Substitute OpenRouter's usage dashboard (openrouter.ai/activity) for the
+Anthropic console in the **Verify Cost** step. Expected per-audit cost is ~5% higher.
 
 ---
 

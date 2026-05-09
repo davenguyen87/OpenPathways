@@ -101,8 +101,11 @@ async function _recordFromProvenance(store, userId, feature, provenance) {
   const inputTokens = usage.inputTokens || 0;
   const outputTokens = usage.outputTokens || 0;
   const model = provenance.model || 'unknown';
+  // provenance.provider is set by generateAssistedSuggestion via prov.name.
+  // Older records without provider default to 'anthropic' (backward-compat).
+  const provider = provenance.provider || 'anthropic';
 
-  const estimatedCostUsd = estimateCostUsd({ model, inputTokens, outputTokens });
+  const estimatedCostUsd = estimateCostUsd({ model, inputTokens, outputTokens, provider });
 
   try {
     await store.recordLlmUsage({

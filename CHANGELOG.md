@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-05-09
+
+### Added
+
+- **OpenRouter as an alternative LLM provider** — same Claude models (Haiku 4.5 / Sonnet 4.6 / Opus 4.7), ~5% gateway markup. Selectable per-workspace via the Settings page provider picker, or server-wide via `LLM_PROVIDER=openrouter` env var. OpenRouter keys (`sk-or-v1-...`) pass the existing `sk-` prefix validation without modification. The engine auto-prefixes bare model aliases (`claude-haiku-4-5` → `anthropic/claude-haiku-4-5`) so no CLI flag changes are needed. Docs: `cloud/DEPLOY.md` § OpenRouter, `docs/STAGING_TEST_LLM_ACTIVATION.md` § Alternative: OpenRouter.
+
 ## [5.2.0] - 2026-05-08
 
 ### Added

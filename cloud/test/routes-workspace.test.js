@@ -1,5 +1,5 @@
 /**
- * Tests for workspace routes (Phase 12.5).
+ * Tests for workspace routes (Phase 12.5 + OpenRouter).
  *
  * Covers:
  *   GET    /api/workspace/llm-config        — read config (redacted)
@@ -364,5 +364,101 @@ describe('POST /api/workspace/llm-config/test', () => {
     } finally {
       llmProviderModule.getProvider = originalGetProvider;
     }
+  });
+
+  it('routes to openrouter provider when stored provider is openrouter', async () => {
+    const userId = await createTestUser();
+    const llmProviderModule = require('../../src/lib/llm-provider.js');
+
+    const fakeProvider = {
+      name: 'openrouter',
+      model: 'anthropic/claude-haiku-4-5',
+      generate: vi.fn().mockResolvedValue({
+        text: 'OK',
+        model: 'anthropic/claude-haiku-4-5',
+        usage: { inputTokens: 5, outputTokens: 1 },
+        latencyMs: 220,
+      }),
+    };
+    const originalGetProvider = llmProviderModule.getProvider;
+    llmProviderModule.getProvider = vi.fn().mockReturnValue(fakeProvider);
+
+    try {
+      // Store an openrouter key.
+      const appForPut = makeApp({ userId });
+      await request(appForPut)
+        .put('/api/workspace/llm-config')
+        .send({ provider: 'openrouter', model: 'anthropic/claude-haiku-4-5', apiKey: 'sk-or-v1-testkey12345678' });
+
+      const appForTest = makeApp({ userId });
+      const res = await request(appForTest)
+        .post('/api/workspace/llm-config/test')
+        .send({});
+
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      // getProvider must have been called with 'openrouter', not 'anthropic'.
+      expect(llmProviderModule.getProvider).toHaveBeenCalledOnce();
+      const callArgs = llmProviderModule.getProvider.mock.calls[0];
+      expect(callArgs[0]).toBe('openrouter');
+    } finally {
+      llmProviderModule.getProvider = originalGetProvider;
+    }
+  });
+});
+
+// ── OpenRouter provider support ───────────────────────────────────────────────
+
+describe('PUT /api/workspace/llm-config — OpenRouter provider', () => {
+  it('accepts provider=openrouter with a valid sk-or-v1-... key', async () => {
+    const userId = await createTestUser();
+    const app = makeApp({ userId });
+
+    const orKey = 'sk-or-v1-validopenrouterkey123456';
+    const res = await request(app)
+      .put('/api/workspace/llm-config')
+      .send({ provider: 'openrouter', model: 'anthropic/claude-haiku-4-5', apiKey: orKey });
+
+    expect(res.status).toBe(204);
+
+    // Verify stored config.
+    const row = await store.getWorkspaceLlmConfig(userId);
+    expect(row.provider).toBe('openrouter');
+    expect(row.model).toBe('anthropic/claude-haiku-4-5');
+    expect(row.keyLast4).toBe(orKey.slice(-4));
+  });
+
+  it('rejects provider=someother (whitelist check covers non-anthropic and non-openrouter)', async () => {
+    const userId = await createTestUser();
+    const app = makeApp({ userId });
+
+    const res = await request(app)
+      .put('/api/workspace/llm-config')
+      .send({ provider: 'someother', model: 'gpt-4o', apiKey: 'sk-someotherkey12345678901' });
+
+    expect(res.status).toBe(400);
+    // Error should name the accepted providers.
+    expect(res.body.error).toMatch(/anthropic/i);
+    expect(res.body.error).toMatch(/openrouter/i);
+  });
+});
+
+describe('GET /api/workspace/llm-config — returns stored provider', () => {
+  it('returns provider=openrouter in the redacted shape after PUT', async () => {
+    const userId = await createTestUser();
+    const app = makeApp({ userId });
+
+    await request(app)
+      .put('/api/workspace/llm-config')
+      .send({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4-6', apiKey: 'sk-or-v1-testkey9999999999' });
+
+    const res = await request(app).get('/api/workspace/llm-config');
+    expect(res.status).toBe(200);
+    expect(res.body.hasKey).toBe(true);
+    expect(res.body.provider).toBe('openrouter');
+    expect(res.body.model).toBe('anthropic/claude-sonnet-4-6');
+    // Must NEVER expose key material.
+    expect(res.body.encryptedApiKey).toBeUndefined();
+    expect(res.body.apiKey).toBeUndefined();
   });
 });
