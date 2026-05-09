@@ -405,16 +405,45 @@ If hosted-online is less urgent than great-local-tool: **5 → 6 → 7 → 8 →
 
 ---
 
-## Future phase — Rebuild in cloud (post-v5, not yet planned)
+## Phase 12 — Rebuild in cloud (~5–8 days)
 
-The CLI now ships a full v4 + v5 rebuild pipeline: safe-tier mechanical fixes, assisted-tier LLM content (provider abstraction pending), and v5 full-tier transforms (landmark insertion, widget replacement, page splitting) behind a `rebuild-checkpoint approve` gate. Cloud surfaces for rebuild are deliberately **out of scope for v1.0** — `v5/PRD_v5_FullTier.md` § "Non-goals" pins this: "v5 is engine and CLI only; web/ and cloud/ adoption is post-v5."
+**Goal:** A logged-in user uploads a package, runs an audit, then runs a rebuild from the same UI. Safe-tier rebuilds produce a downloadable `rebuilt.zip` directly. Full-tier rebuilds open a browser-based checkpoint review with per-transform approve/reject controls and promote on submission. Atomic transform undo lives in the same per-job UI as v4 single-patch undo.
 
-When cloud picks rebuild up, the work breaks down into roughly these capabilities (size and ordering TBD when the phase is opened):
+**Success criteria:**
+- "Rebuild this audit" CTA appears next to every completed audit job in the history pane. Clicking it queues a rebuild against the same uploaded package.
+- Rebuild jobs run in the existing pg-boss queue. The worker reuses `src/rebuild/index.js`. Cancel via `AbortSignal` works the same as audit cancel.
+- After a safe-tier rebuild completes: the report panel exposes `rebuilt.zip`, `rebuild-manifest.json`, and a rendered `rebuild-diff.html` inline.
+- After a full-tier rebuild completes: the panel renders `rebuild-preview.html` in an iframe with a sidebar listing every staged transform. Per-transform approve / reject toggles + a single "Promote" button POST decisions to the server.
+- Promote calls `src/rebuild/checkpoint.js`'s `promote()`, runs verify, and updates the job. On failure (verify regression, manifest XML invalid, SCO sequence broken), the staging area is preserved server-side and the UI surfaces the rollback reason.
+- Transform-atomic undo is reachable from the job's actions menu: "Revert transform <id>" reverses the bundle and re-renders the diff.
 
-- **Rebuild jobs** in the existing job-manager + worker — same shape as audit jobs but heavier (the v5 transformer pass adds time depending on package size).
-- **Checkpoint review UI** — render `rebuild-preview.html` in the browser, POST per-transform approve/reject decisions to the backend, and call into `src/rebuild/checkpoint.js` to promote.
-- **Per-engagement isolation** for `.rebuild-staging/` directories on the storage adapter (MinIO / S3).
-- **Atomic transform undo** wired into the existing job-history surface.
-- **Quotas** — likely tighter for rebuild than audit (transformer passes consume more CPU + storage).
+**Decisions to lock in:**
+- **Storage layout for staging:** `.rebuild-staging/` lives under the same per-engagement bucket prefix as the audit results. Lifecycle: 7-day TTL on staging if no decision has been recorded; promoted artifacts honor the engagement's normal retention window.
+- **Concurrency:** rebuild is heavier than audit. Cap the queue at `WORKER_REBUILD_CONCURRENCY=2` separate from `WORKER_CONCURRENCY=3` for audit. Per-user quota: 1 in-flight rebuild + 2 in-flight audits.
+- **Checkpoint state:** the browser POSTs `{ [transformId]: 'approve'|'reject' }` to `/api/jobs/:id/checkpoint`. Server writes `checkpoint-state.json` to the staging dir, then calls `promote()`. The HTML's localStorage is a UX nicety, not the source of truth.
+- **Auth scope:** rebuild and approve both require the same role as the original audit's owner. No team sharing in v1.0; that's a Phase 13+ decision.
+- **LLM provider:** assisted-tier rebuild is gated behind a per-engagement env-configured provider, same shape as v3's audit `--llm-provider` flag. No firm-wide default.
 
-Forward-looking context only. No cloud rebuild work has been scoped or sized; do not start without raising it as a new phase first.
+**Out of scope for Phase 12:**
+- Editing the rebuilt package in the browser before download.
+- Comparing two rebuild manifests side-by-side.
+- Multi-tenant approval workflows (one user proposes, another approves) — single-approver only.
+- Modernizing SCORM versions (still its own future workstream).
+
+**Sizing:** rough working-day estimates for a single implementer.
+
+| Work | Days |
+|------|------|
+| Backend: rebuild job kind, worker dispatch, queue separation, quota | 1.0 |
+| Backend: checkpoint endpoints, staging storage adapter, retention worker | 1.0 |
+| Backend: undo endpoint with `--transform` semantics, audit log entries | 0.5 |
+| Frontend: "Rebuild this audit" CTA, mode picker, progress feedback | 1.0 |
+| Frontend: full-tier checkpoint review UI (preview iframe + sidebar + promote button) | 2.0 |
+| Frontend: undo controls + post-undo diff refresh | 0.5 |
+| Tests: integration tests covering safe + full + promote-failure rollback | 1.0 |
+| Hardening: rate limits on rebuild + checkpoint, quota enforcement, error UX | 0.5 |
+| **Total** | **~7.5 days** |
+
+Order this **after** Phase 11 settles. Don't start Phase 12 without confirming the v5 engine ships are stable in CLI usage for at least one full Skill Loop engagement cycle — the engine is well-tested in unit + integration land but real-package edge cases will surface from consultant use first.
+
+The relevant engine modules are in `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `src/reporter/rebuild-preview.js`. The per-package output contract is documented in `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md` § "Manifest schema v2.0.0".

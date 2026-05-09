@@ -187,9 +187,9 @@ clearly. Each entry: phase, file, one-line reason.
 
 ## Rebuild surfaces (v4 / v5) — not yet exposed in cloud
 
-The CLI now ships a full rebuild pipeline: v4 safe-tier (deterministic mechanical fixes), v4.1 assisted-tier (LLM-generated content — provider abstraction pending), v5 full-tier (landmark insertion, widget replacement, page splitting, gated behind a `rebuild-checkpoint approve` step). See `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `v5/PRD_v5_FullTier.md`.
+The CLI now ships a full rebuild pipeline: safe-tier (deterministic mechanical fixes), assisted-tier (LLM-generated content — provider abstraction pending), full-tier (landmark insertion, widget replacement, page splitting, gated behind a `rebuild-checkpoint approve` step). See `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md`.
 
-Cloud adoption is **post-v5** by design — the v5 PRD scopes engine + CLI only. When cloud picks rebuild up, the surfaces it will need:
+Cloud rebuild adoption is **deferred by design** — the engine + CLI shipped first. When cloud picks rebuild up, the surfaces it will need:
 
 - Multi-tenant rebuild jobs (queue + worker; rebuild is heavier than audit because of the per-package transformer pass).
 - Browser-side checkpoint UI (the consultant reviews `rebuild-preview.html` and POSTs approve/reject decisions).

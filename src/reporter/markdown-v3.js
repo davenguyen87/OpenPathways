@@ -397,7 +397,7 @@ function buildMethodNote(scorecard) {
   md += `**Dynamic checks:** ${complete ? 'Yes, ran via Playwright and headless Chromium' : 'No, did not run'}.\n\n`;
   md += `**Audit timestamp:** ${formatDate(scannedAt)}\n\n`;
   md += `**Tool version:** ${tool} v${version}\n\n`;
-  md += `**Documentation:** See the project PRD at docs/PRD_v3_SkillLoop_Scoping.md for detailed scope and methodology.\n`;
+  md += `**Documentation:** See the project PRD at archive/workstreams/PRD_v3_SkillLoop_Scoping.md for detailed scope and methodology.\n`;
 
   return md;
 }

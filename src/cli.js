@@ -24,7 +24,7 @@ program
 const auditCmd = program
   .command('audit <package>')
   .description('Audit a single .zip SCORM/AICC/xAPI package and generate a brand-matched HTML report.')
-  .option('--engagement <id>', 'Engagement ID (required for v3 deliverables; fall back to v2 behavior if omitted)')
+  .option('--engagement <id>', 'Engagement ID (required for the engagement deliverable; legacy ./prism-report/ fallback used if omitted, with a deprecation warning)')
   .option('--engagement-redact', 'Replace client name with engagement ID throughout report')
   .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
   .option('--baseline <path>', 'Path to prior results.json; suppress violations present in baseline')
@@ -36,7 +36,7 @@ const auditCmd = program
   .option('--llm-provider <provider>', 'LLM provider for assisted findings (off by default; requires --llm-key-from-env)')
   .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
   .option('--max-violations <n>', 'Maximum violations allowed before failing (default: unlimited)', null)
-  .option('--output <dir>', 'Output directory (deprecated in v3; ignored when --engagement is set)', './prism-report')
+  .option('--output <dir>', 'Output directory (legacy fallback; ignored when --engagement is set)', './prism-report')
   .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
   .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag21)', 'wcag21')
   .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
@@ -48,7 +48,7 @@ const auditCmd = program
 const auditLibCmd = program
   .command('audit-library <directory>')
   .description('Audit all .zip files in a directory and generate per-package reports plus a library-level rollup.')
-  .option('--engagement <id>', 'Engagement ID (REQUIRED for v3 library mode)')
+  .option('--engagement <id>', 'Engagement ID (required for library mode)')
   .option('--engagement-redact', 'Replace client name with engagement ID throughout reports')
   .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
   .option('--browser <browser>', 'Browser for dynamic checks: chromium|firefox|webkit (default: chromium)', 'chromium')
@@ -178,13 +178,19 @@ async function auditAction(packagePath, cmdOpts) {
     // Determine output mode
     let outputDir = cmdOpts.output;
     if (cmdOpts.engagement) {
-      // v3 mode: engagement namespacing
+      // Engagement-namespaced output (the supported path).
       const packageName = path.basename(packagePath, '.zip');
       outputDir = path.join('./engagements', cmdOpts.engagement, packageName);
     } else {
-      // v2 backward compatibility mode
+      // Legacy fallback: ./prism-report/ output. Deprecated; scheduled for
+      // removal in a future major release.
       if (!isJsonOnly) {
-        console.log(kleur.yellow('⚠ Note: --engagement not specified. Using v2 output mode (./prism-report/). Set --engagement for v3 deliverable mode.'));
+        console.log(kleur.yellow(
+          '⚠ DEPRECATED: --engagement not specified — falling back to legacy ./prism-report/ output.'
+        ));
+        console.log(kleur.yellow(
+          '  This fallback is scheduled for removal in a future major release. Pass --engagement <id> to use the supported path.'
+        ));
       }
     }
 

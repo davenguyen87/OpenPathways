@@ -15,9 +15,11 @@ The repo ships three surfaces:
 3. **Hosted multi-tenant service** (`cloud/`) — magic-link auth, S3 storage, worker queue, Coolify deploy. `npm run cloud`. Audit-only; rebuild surfaces are CLI for now.
 
 Current specs:
-- `docs/PRD_v3_SkillLoop_Scoping.md` — v3 (audit deliverable)
-- `v4/PRD_v4_Rebuild.md` — v4 (safe-tier rebuild)
-- `v5/PRD_v5_FullTier.md` — v5 (full-tier rebuild + checkpoint lifecycle)
+- `archive/workstreams/PRD_v3_SkillLoop_Scoping.md` — audit deliverable spec (shipped 2026-05-05)
+- `archive/workstreams/v4-rebuild/PRD_v4_Rebuild.md` — safe-tier rebuild spec (shipped 2026-05-07)
+- `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md` — full-tier rebuild + checkpoint lifecycle spec (shipped 2026-05-08, current)
+
+Workstream PRDs and per-chunk build prompts live in `archive/workstreams/` once shipped — they're historical reference, not active reading.
 
 Check author contract: `docs/CONTRACT.md`. Dynamic checks design: `docs/DYNAMIC_CHECKS.md`. Older phase docs are in `archive/phase-docs/`.
 
@@ -57,8 +59,7 @@ src/
 
 web/                    ← v1 local-only Express UI; frozen reference (see web/CLAUDE.md)
 cloud/                  ← hosted multi-tenant; deploys on Coolify (see cloud/CLAUDE.md, cloud/ROADMAP.md)
-v4/                     ← v4 PRD + per-chunk build prompts (rebuild safe tier — shipped)
-v5/                     ← v5 PRD + per-chunk build prompts (rebuild full tier — shipped)
+archive/workstreams/    ← shipped workstream PRDs + per-chunk build prompts (v3, v4, v5)
 config/                 ← brand.json, effort-calibration.json
 scripts/                ← check-no-network, network-trap, self-audit-report,
                           build-fixtures, build-fixtures-v5
@@ -79,7 +80,7 @@ engagements/            ← per-client audit + rebuild output (gitignored)
 - **Library mode**: `audit-library <dir>` audits an entire client library and writes a single rollup at `engagements/<id>/_library-rollup.{html,md}`.
 - **Rebuild tiers** (closed system): `safe` (v4 — deterministic mechanical fixes, default), `assisted` (v4.1 — LLM-generated content for single-file judgment items), `full` (v5 — landmark insertion, widget replacement, page splitting). `--mode` selects.
 - **Checkpoint gate**: `--mode full` stages outputs under `.rebuild-staging/` and requires `prism rebuild-checkpoint approve` before final promotion. Default checkpoint-on; `--no-checkpoint` is the explicit opt-out for CI scenarios.
-- **Rebuild manifest schema**: `1.0.0` for safe / assisted runs (no transforms), `2.0.0` when v5 transforms are present. Backward-compatible — v4 manifests load unchanged. Schema details in `v5/PRD_v5_FullTier.md` § "Manifest schema v2.0.0".
+- **Rebuild manifest schema**: `1.0.0` for safe / assisted runs (no transforms), `2.0.0` when full-tier transforms are present. Backward-compatible — older manifests load unchanged. Schema details in `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md` § "Manifest schema v2.0.0".
 - **Brand**: `config/brand.json` is the source of truth for HTML report colors; `--brand-config <path>` overrides per engagement.
 - **Scope estimates**: `config/effort-calibration.json` defines hour-bands per disposition (auto-fix safe / assisted / author rework / content rework / recommend retire), with per-criterion overrides.
 - **Contrast engine**: axe-core static CSS analysis (do not reimplement).
