@@ -1,5 +1,7 @@
 # CLAUDE.md — Prism v4 Rebuild Workstream
 
+> **Status (2026-05-08):** v4 shipped. Safe-tier rebuild + diff/summary reports + undo are merged. The deferred-feature notice for `--mode full` was removed in v5; full-tier transforms now run through the same orchestrator. v4.1 (assisted-tier LLM content) remains pending. See `v5/PRD_v5_FullTier.md` and `v5/CLAUDE.md` for the next workstream.
+
 This file is **scoped to the v4 rebuild work only**. The repo's top-level `CLAUDE.md` still governs everything else — read it first if you don't already know the project. This document tells a Claude Code worker picking up a single rebuild prompt how to fit into the parallel build.
 
 ## What v4 adds
@@ -41,7 +43,9 @@ Each prompt has its own acceptance criteria. The high bar across all of them:
 
 ## Tier semantics in v4
 
-Only **safe** tier is implemented. The CLI accepts `--mode safe|assisted|full`. `assisted` and `full` print a deferred-feature notice and exit cleanly with code 0. The orchestrator's tier dispatch must be in place so v4.1 only adds new fixer modules, not architectural changes.
+Only **safe** tier is implemented in this workstream. The CLI accepts `--mode safe|assisted|full`. In v4 itself, `assisted` and `full` printed a deferred-feature notice and exited cleanly with code 0. The orchestrator's tier dispatch was built so later tiers add new fixer / transformer modules, not architectural changes.
+
+> **v5 update:** the `--mode full` deferred-feature notice has been removed. v5's transformers run through the same orchestrator behind a checkpoint gate. The `--mode assisted` notice is preserved for installs without v4.1's LLM glue (still pending). See the v5 workstream for the full-tier surface.
 
 ## When in doubt
 

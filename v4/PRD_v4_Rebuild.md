@@ -1,10 +1,10 @@
 # PRD v4: Rebuild Stage
 
-**Status:** Draft
+**Status:** Shipped (2026-05-07). Extended by [PRD v5](../v5/PRD_v5_FullTier.md) on 2026-05-08 with the full tier (transformers + checkpoint lifecycle). v4's safe tier remains authoritative; the deferred-feature semantics for `--mode full` documented below are now historical — full-tier dispatch is live in v5.
 **Date:** 2026-05-07
 **Author:** Dave Nguyen
 **Built by:** Claude (autonomous, parallel terminals)
-**Supersedes nothing.** Extends [PRD v3](../PRD_v3_SkillLoop_Scoping.md) with a Rebuild stage. v3's audit, triage, scoping, and brand-matched deliverable remain authoritative; v4 adds a stage that consumes their output.
+**Supersedes nothing.** Extends [PRD v3](../docs/PRD_v3_SkillLoop_Scoping.md) with a Rebuild stage. v3's audit, triage, scoping, and brand-matched deliverable remain authoritative; v4 adds a stage that consumes their output.
 
 ---
 

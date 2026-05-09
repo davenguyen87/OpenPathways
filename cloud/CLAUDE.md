@@ -184,3 +184,16 @@ clearly. Each entry: phase, file, one-line reason.
 - Phases 5–10 shipped: persistence, real cancellation (`AbortSignal`), baseline diff + auto-fix in the UI, batch upload, hosted hardening (helmet + rate limit + magic-link + quotas + retention), Docker image, Coolify deploy.
 - Phase 11 (later items: Stripe billing, admin UI, trends dashboard) preserved in `ROADMAP.md` as historical context, not currently active.
 - `/web` Phases 1–4 complete; serves as reference implementation.
+
+## Rebuild surfaces (v4 / v5) — not yet exposed in cloud
+
+The CLI now ships a full rebuild pipeline: v4 safe-tier (deterministic mechanical fixes), v4.1 assisted-tier (LLM-generated content — provider abstraction pending), v5 full-tier (landmark insertion, widget replacement, page splitting, gated behind a `rebuild-checkpoint approve` step). See `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `v5/PRD_v5_FullTier.md`.
+
+Cloud adoption is **post-v5** by design — the v5 PRD scopes engine + CLI only. When cloud picks rebuild up, the surfaces it will need:
+
+- Multi-tenant rebuild jobs (queue + worker; rebuild is heavier than audit because of the per-package transformer pass).
+- Browser-side checkpoint UI (the consultant reviews `rebuild-preview.html` and POSTs approve/reject decisions).
+- Per-engagement isolation for `.rebuild-staging/` directories on the storage adapter.
+- Atomic transform undo wired into the existing job-history surface.
+
+Don't build any of this from cloud work without flagging it as a new phase in `ROADMAP.md`.

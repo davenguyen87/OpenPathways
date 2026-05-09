@@ -402,3 +402,19 @@ If hosted-online is less urgent than great-local-tool: **5 → 6 → 7 → 8 →
 - Comparing > 2 audit runs in one view.
 - Publishing to npm.
 - Publishing as a managed SaaS for paying users.
+
+---
+
+## Future phase — Rebuild in cloud (post-v5, not yet planned)
+
+The CLI now ships a full v4 + v5 rebuild pipeline: safe-tier mechanical fixes, assisted-tier LLM content (provider abstraction pending), and v5 full-tier transforms (landmark insertion, widget replacement, page splitting) behind a `rebuild-checkpoint approve` gate. Cloud surfaces for rebuild are deliberately **out of scope for v1.0** — `v5/PRD_v5_FullTier.md` § "Non-goals" pins this: "v5 is engine and CLI only; web/ and cloud/ adoption is post-v5."
+
+When cloud picks rebuild up, the work breaks down into roughly these capabilities (size and ordering TBD when the phase is opened):
+
+- **Rebuild jobs** in the existing job-manager + worker — same shape as audit jobs but heavier (the v5 transformer pass adds time depending on package size).
+- **Checkpoint review UI** — render `rebuild-preview.html` in the browser, POST per-transform approve/reject decisions to the backend, and call into `src/rebuild/checkpoint.js` to promote.
+- **Per-engagement isolation** for `.rebuild-staging/` directories on the storage adapter (MinIO / S3).
+- **Atomic transform undo** wired into the existing job-history surface.
+- **Quotas** — likely tighter for rebuild than audit (transformer passes consume more CPU + storage).
+
+Forward-looking context only. No cloud rebuild work has been scoped or sized; do not start without raising it as a new phase first.
