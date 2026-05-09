@@ -1,8 +1,12 @@
 # Prism
 
-WCAG 2.1 AA + Section 508 accessibility audits for SCORM 1.2, SCORM 2004, AICC, and xAPI/Tin Can packages. Produces brand-matched HTML reports with triage-tagged findings and scope estimates.
+WCAG 2.1 AA + Section 508 accessibility audits **and rebuilds** for SCORM 1.2, SCORM 2004, AICC, and xAPI/Tin Can packages. Produces brand-matched HTML reports with triage-tagged findings, scope estimates, and — when audit findings are mechanically resolvable — a rebuilt `.zip` plus a per-patch diff, summary, and (for full-tier rebuilds) a side-by-side preview gated behind a human checkpoint.
 
-v3 transforms Prism from a JSON-generating audit tool into a senior-consultant delivery platform for accessibility assessments scoped for Cornerstone OnDemand consulting engagements.
+The deliverable platform now ships in three tiers:
+
+- **v3 — Audit.** Brand-matched HTML/Markdown/JSON reports with triage and scope.
+- **v4 — Safe-tier rebuild.** Deterministic mechanical fixes inside a single file (alt text scaffolding, `lang`, `title`, skip links, form labels, etc.) — `prism rebuild --mode safe`.
+- **v5 — Full-tier rebuild.** Coordinated, package-scoped rewrites: ARIA landmark insertion + labeling, custom-widget replacement (tabs / accordion / carousel / dialog from a vetted ARIA library), and SCO page splitting with `imsmanifest.xml` edits. Staged under `.rebuild-staging/` and gated behind `prism rebuild-checkpoint approve` — `prism rebuild --mode full`.
 
 This README covers the **CLI** (the primary surface). Two adjacent surfaces share the same audit core under `src/`:
 
@@ -28,6 +32,19 @@ node src/cli.js audit-library ./client-library/ --engagement SL-2026-0418
 ```
 
 Output: per-package reports in `./engagements/SL-2026-0418/<package-name>/` plus a single library rollup at `./engagements/SL-2026-0418/_library-rollup.html`.
+
+Rebuild a package once an audit exists:
+
+```bash
+# v4 — safe-tier mechanical fixes only (deterministic, single-file)
+node src/cli.js rebuild my-course.zip --engagement SL-2026-0418 --mode safe
+
+# v5 — full-tier (safe + assisted + transforms; staged for review)
+node src/cli.js rebuild my-course.zip --engagement SL-2026-0418 --mode full
+node src/cli.js rebuild-checkpoint approve --engagement SL-2026-0418 --package my-course --all
+```
+
+Safe-tier writes `rebuilt.zip` + `rebuild-manifest.json` + `rebuild-diff.html` + `rebuild-summary.html` directly. Full-tier stages outputs under `.rebuild-staging/` and waits for explicit operator approval before promoting; the preview report (`rebuild-preview.html`) renders side-by-side per-transform with an interactive approval form.
 
 ---
 
@@ -90,6 +107,56 @@ The rollup report includes:
 - Top three risks aggregated across the library
 - Per-package summary table
 
+### `rebuild <package.zip>`
+
+Apply v4 / v5 fixers and transformers to produce a rebuilt package. Defaults to `--mode safe` (v4 deterministic mechanical fixes). `--mode full` adds v5 transforms (landmarks, widget replacement, page splitting) and stages outputs for review unless `--no-checkpoint` is passed.
+
+```bash
+node src/cli.js rebuild ./legacy-course.zip --engagement SL-2026-0418 --mode full
+```
+
+Produces (mode safe):
+- `./engagements/SL-2026-0418/legacy-course/rebuilt.zip`
+- `./engagements/SL-2026-0418/legacy-course/rebuild-manifest.json` (every patch with file/line/before/after)
+- `./engagements/SL-2026-0418/legacy-course/rebuild-diff.html` (per-patch reviewable diff)
+- `./engagements/SL-2026-0418/legacy-course/rebuild-summary.html` (scoreboard with verification numbers)
+
+Mode full additionally stages under `.rebuild-staging/` and requires `rebuild-checkpoint approve` before promotion. After approval, all five v5 artifacts land at the package root.
+
+### `rebuild-library <directory>`
+
+Batch rebuild. Mirrors `audit-library`. Each package gets its own staging directory (full mode) or its own rebuilt artifacts (safe mode). Approve every package's staged transforms with `rebuild-checkpoint approve` per package.
+
+### `rebuild-checkpoint approve|reject|list` (v5)
+
+Lifecycle commands for full-tier staged rebuilds.
+
+```bash
+# List every package with a pending checkpoint under an engagement
+node src/cli.js rebuild-checkpoint list --engagement SL-2026-0418
+
+# Approve every staged transform for a package
+node src/cli.js rebuild-checkpoint approve --engagement SL-2026-0418 --package legacy-course --all
+
+# Approve a specific transform (rejecting the rest)
+node src/cli.js rebuild-checkpoint approve --engagement SL-2026-0418 --package legacy-course --transform transform-0001
+
+# Discard the staging directory entirely (no effect on any prior rebuilt.zip)
+node src/cli.js rebuild-checkpoint reject --engagement SL-2026-0418 --package legacy-course --force
+```
+
+Promotion runs `verify()`, validates rewritten `imsmanifest.xml` against the SCORM schema (when a transform edited it), and checks SCO sequence integrity. Any failure rolls back atomically; the staging area is preserved for re-attempt.
+
+### `rebuild-undo <package>`
+
+Atomic revert. Pass either `--patch <id>` (v4 — individual patches) or `--transform <id>` (v5 — every patch in the transform reverts together). Mixing is supported; passing a patch that belongs to a transform without including the transform is refused.
+
+```bash
+node src/cli.js rebuild-undo legacy-course --engagement SL-2026-0418 --transform transform-0001
+```
+
+Re-runs `verify()` after undo and updates the manifest with a `revertHistory` entry.
+
 ---
 
 ## Key flags
@@ -101,10 +168,15 @@ The rollup report includes:
 | `--brand-config <path>` | Path to custom brand config | `config/brand.json` | Override colors and brand marks for white-label or co-branded deliverables. |
 | `--standard <standard>` | WCAG version: `wcag21` or `wcag22` | `wcag21` | Default flipped from v2 to 2.1. Use `wcag22` for forward-looking audits. |
 | `--baseline <path>` | Path to prior `results.json` | — | Suppress violations already present in the baseline (single-package `audit` only). |
+| `--mode <tier>` | Rebuild tier: `safe`, `assisted`, or `full` | `safe` | `rebuild` / `rebuild-library` only. v4 ships `safe`; v4.1 adds `assisted`; v5 adds `full`. |
+| `--no-checkpoint` | Skip the checkpoint gate; write final artifacts directly | (off — checkpoint is on by default) | `rebuild --mode full` only. Default off; staging gate is on by default for full mode. |
+| `--transform <id>` | Specific transform id (repeatable) | — | `rebuild-checkpoint approve` (which transforms to approve), `rebuild-undo` (which transforms to revert). |
+| `--all` | Approve every pending transform | — | `rebuild-checkpoint approve` only. |
+| `--force` | Skip the confirmation prompt | — | `rebuild-checkpoint reject` only. |
 | `--llm-provider <provider>` | LLM provider for assisted findings | — | Off by default. Both `--llm-provider` and `--llm-key-from-env` required to enable. |
 | `--llm-key-from-env <env-var>` | Environment variable holding LLM API key | — | Off by default. No assisted findings without both flags set. |
 | `--browser <browser>` | Browser for dynamic checks | `chromium` | `chromium`, `firefox`, or `webkit`. |
-| `--fix` | Apply mechanical fixes; write corrected package | — | Writes `<package>.scorm-fixed.zip`. Single-package `audit` only. |
+| `--fix` | Apply mechanical fixes; write corrected package | — | Writes `<package>.scorm-fixed.zip`. Single-package `audit` only. Legacy v2 flag — prefer `rebuild --mode safe` for engagement work. |
 | `--fix-dry-run` | Preview fixes without writing | — | Single-package `audit` only. |
 | `--format <format>` | Report format (legacy v2 flag) | `md` | `md` or `txt`. Ignored in v3 (HTML is always generated). |
 | `--json` | Output JSON scorecard to stdout only | — | Suppresses spinner and file output. |
@@ -123,14 +195,22 @@ v3 organizes all output under engagement-namespaced directories to prevent cross
 ```
 ./engagements/<engagement-id>/
 ├── <package-name-1>/
-│   ├── report.html          (primary deliverable)
-│   ├── report.md            (alternative, editable)
-│   └── results.json         (byproduct for automation)
+│   ├── report.html                  (primary audit deliverable)
+│   ├── report.md                    (alternative, editable)
+│   ├── results.json                 (audit byproduct)
+│   ├── rebuilt.zip                  (v4/v5 — present after rebuild)
+│   ├── rebuild-manifest.json        (every patch + transform; schema 2.0.0 when v5 transforms are present)
+│   ├── rebuild-diff.html            (v4 — per-patch reviewable diff)
+│   ├── rebuild-summary.html         (v4 — scoreboard; v5 extends with transform stats)
+│   ├── rebuild-preview.html         (v5 — side-by-side per-transform with approval form)
+│   └── .rebuild-staging/            (v5 — present while a full-mode rebuild awaits checkpoint approval)
+│       ├── rebuilt-staged.zip
+│       ├── rebuild-manifest-staged.json
+│       ├── rebuild-preview.html
+│       └── checkpoint-state.json    (per-transform approve/reject decisions)
 ├── <package-name-2>/
-│   ├── report.html
-│   ├── report.md
-│   └── results.json
-└── _library-rollup.html     (batch mode only; aggregated view)
+│   └── ...
+└── _library-rollup.html             (batch mode only; aggregated view)
     (+ _library-rollup.md)
 ```
 
@@ -165,6 +245,20 @@ Every finding receives both a **severity** (from axe-core: Critical, Serious, Mo
 | `recommend retire` | Remediation cost exceeds rebuild-in-Galaxy cost | n/a |
 
 Effort estimates are derived from effort-calibration.json and roll up at package and library level.
+
+---
+
+## Rebuild tiers
+
+The rebuild system is closed at three tiers. Each is opt-in via `--mode`. Findings that no tier can resolve become deferred and stay in the audit's "author rework" / "content rework" / "recommend retire" buckets.
+
+| Tier | Flag | What it does | Risk | Gate |
+|------|------|--------------|------|------|
+| **Safe** (v4) | `--mode safe` (default) | Deterministic, single-file mechanical patches: `alt=""` for decorative images, `<html lang>`, `<title>`, skip links, `<label for>` ↔ `<input id>` association, etc. | Low — every fix has a documented invariant | Patch-level diff at `rebuild-diff.html`. No staging. |
+| **Assisted** (v4.1) | `--mode assisted` | Safe + LLM-generated content for single-file judgment items: alt text, ARIA labels, plain-language rewrites. Requires a configured LLM provider. | Medium — provenance logged per patch | Same as safe (patch-level diff). |
+| **Full** (v5) | `--mode full` | Safe + assisted + transforms: ARIA landmark insertion + labeling, custom-widget replacement (tabs / accordion / carousel / dialog), and SCO page splitting (rewrites `imsmanifest.xml`). | Higher — rewriting can change meaning | Mandatory checkpoint at `.rebuild-staging/`; requires `rebuild-checkpoint approve` to promote. Promotion re-runs `verify()`, validates manifest XML against the SCORM schema, and walks the new SCO sequence. Rolls back atomically on any failure. |
+
+Every patch — at any tier — is reversible. v4 ships single-patch revert; v5 adds atomic transform revert that undoes every patch in a transform together.
 
 ---
 
@@ -244,10 +338,30 @@ Redact client name in the draft (for internal review before delivery):
 node src/cli.js audit course.zip --engagement SL-2026-0418 --engagement-redact
 ```
 
-Apply safe-tier mechanical fixes:
+Apply safe-tier mechanical fixes (v2-style — produces `<package>.scorm-fixed.zip`):
 
 ```bash
 node src/cli.js audit course.zip --engagement SL-2026-0418 --fix
+```
+
+Run a v4 safe-tier rebuild instead — produces `rebuilt.zip` plus a per-patch diff:
+
+```bash
+node src/cli.js rebuild course.zip --engagement SL-2026-0418 --mode safe
+```
+
+Run a v5 full-tier rebuild and approve every staged transform after review:
+
+```bash
+node src/cli.js rebuild course.zip --engagement SL-2026-0418 --mode full
+# review engagements/SL-2026-0418/course/.rebuild-staging/rebuild-preview.html
+node src/cli.js rebuild-checkpoint approve --engagement SL-2026-0418 --package course --all
+```
+
+Roll back a v5 transform atomically:
+
+```bash
+node src/cli.js rebuild-undo course --engagement SL-2026-0418 --transform transform-0001
 ```
 
 ---
@@ -266,13 +380,15 @@ Requires Node.js 18+.
 
 ## Architecture
 
-Prism operates in three layers:
+Prism operates in five layers:
 
 1. **Parser** (`src/parser/`) — Detects SCORM 1.2, SCORM 2004, AICC, cmi5, xAPI manifests and extracts entry points.
 2. **Checks** (`src/checks/`, `src/dynamic-checks/`) — 21 static WCAG criteria plus dynamic browser-based checks (focus order, focus visible, consistent identification, name/role/value, status messages) executed against the live accessibility tree. Powered by axe-core for contrast and semantic analysis.
-3. **Reporter** (`src/reporter/`) — Converts findings into brand-matched HTML/Markdown reports, JSON scorecards, and Section 508 mapping tables. v3 layers triage taxonomy, scope estimation, and multi-engagement output isolation on top.
+3. **Reporter** (`src/reporter/`) — Converts findings into brand-matched HTML/Markdown reports, JSON scorecards, and Section 508 mapping tables. v3 layers triage taxonomy, scope estimation, and multi-engagement output isolation on top. v5 adds the side-by-side preview renderer for full-tier transforms.
+4. **Fixers** (`src/fixers/`) — v4 — single-file deterministic mechanical patches (decorative-image alt, `lang`, `title`, skip links, form-label association, etc.). Each fixer is duck-typed (`canFix` + `fix`) and registered via directory scan.
+5. **Transformers + widgets** (`src/transformers/`, `src/widgets/`) — v5 — package-scoped rewrites. Transformers (`canTransform` + `apply` + `revert`) coordinate multi-file edits including `imsmanifest.xml` rewrites. Widgets ship as vetted ARIA-compliant HTML/CSS/JS fragments matching the W3C ARIA Authoring Practices Guide; widget-replacement transformers consume them. Every transform stages, renders side-by-side, and requires checkpoint approval before promotion.
 
-The audit engine and dynamic checks are unchanged from v2. The report layer, defaults, and CLI surface are what changed in v3.
+The rebuild orchestrator (`src/rebuild/`) sits between layers 4 and 5: it dispatches fixers per-file then transformers per-package, validates output, stages full-tier results under `.rebuild-staging/`, and is the single writer of `rebuild-manifest.json` (schema 1.0.0 for safe / assisted runs, 2.0.0 when transforms are present).
 
 ---
 
