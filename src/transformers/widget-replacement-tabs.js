@@ -49,6 +49,7 @@ const {
   applyMods,
   linkPatchToTransform
 } = require('../rebuild/types');
+const { classifyWidget } = require('../lib/transformer-judgment');
 
 const TRANSFORMER_ID = 'widget-replacement-tabs';
 const FAMILY = 'widget';
@@ -102,19 +103,84 @@ module.exports = {
 
     const findings = findingsFor(packageContext);
     const bypass = bypassAuditGate(packageContext);
+    const threshold = packageContext?.opts?.llmJudgmentConfidenceThreshold ?? 0.7;
 
     for (const file of htmlFiles(packageContext)) {
       const plan = planForFile(file, findings, bypass);
       for (const d of plan.declines) deferred.push(d);
       if (plan.substitutions.length === 0) continue;
 
-      const mods = plan.substitutions.map((s) => ({
+      // LLM judgment: classify each heuristic candidate before emitting patches.
+      const acceptedSubs = [];
+      for (const sub of plan.substitutions) {
+        if (packageContext.provider) {
+          const $ = cheerio.load(file.content, { decodeEntities: false });
+          const candidateRoot = $('*').toArray().find((el) =>
+            el.attribs && hasClassToken(el, TAB_CLASS_TOKENS)
+          );
+          const structure = candidateRoot ? {
+            tagName: (candidateRoot.name || 'div').toLowerCase(),
+            childCount: (candidateRoot.children || []).filter((c) => c.type === 'tag').length,
+            hasButtons: $('[data-prism-tab], button, [role="tab"]', candidateRoot).length > 0,
+            hasForm: $(candidateRoot).find('form').length > 0,
+            headingCount: $(candidateRoot).find('h1,h2,h3,h4,h5,h6').length
+          } : { tagName: 'div', childCount: 0, hasButtons: false, hasForm: false, headingCount: 0 };
+          const classTokens = candidateRoot
+            ? ((candidateRoot.attribs && candidateRoot.attribs.class) || '').split(/\s+/).filter(Boolean)
+            : [];
+          const result = await classifyWidget({
+            packageContext,
+            candidate: {
+              file: file.path,
+              html: sub.originalText,
+              classes: classTokens,
+              structure,
+              rationale: `matched TAB_CLASS_TOKENS on wrapper; ${structure.childCount} children`
+            },
+            expectedType: 'tabs',
+            options: packageContext.opts || {},
+            provider: packageContext.provider
+          });
+          if (result.ok) {
+            let effectiveVerdict = result.verdict;
+            if (result.verdict === 'match' && result.confidence < threshold) {
+              effectiveVerdict = 'uncertain';
+            }
+            if (effectiveVerdict === 'no-match') {
+              deferred.push({
+                criterion: '4.1.2',
+                triage: TRIAGE,
+                reason: `LLM rejected as not a tabs widget: ${result.rationale}`,
+                file: file.path,
+                line: 0
+              });
+              continue; // skip this candidate
+            }
+            // match or uncertain: emit with judgment field
+            sub._judgment = {
+              source: 'llm',
+              verdict: effectiveVerdict,
+              confidence: result.confidence,
+              rationale: result.rationale,
+              ...result.provenance
+            };
+          } else {
+            // ok:false — heuristic decision stands; log and continue without judgment
+            log.push(`[${TRANSFORMER_ID}] LLM judgment skipped for ${file.path}: ${result.reason}`);
+          }
+        }
+        acceptedSubs.push(sub);
+      }
+
+      if (acceptedSubs.length === 0) continue;
+
+      const mods = acceptedSubs.map((s) => ({
         offset: s.offset,
         originalText: s.originalText,
         replacementText: s.replacementText
       }));
 
-      for (const sub of plan.substitutions) {
+      for (const sub of acceptedSubs) {
         const patch = buildPatch({
           fixer: TRANSFORMER_ID,
           criterion: sub.criterion,
@@ -135,6 +201,7 @@ module.exports = {
           // zero-width context is sufficient for revertPatch's indexOf.
           contextChars: 0
         });
+        if (sub._judgment) patch._judgment = sub._judgment;
         patches.push(patch);
         filesAffected.add(file.path);
       }
@@ -142,9 +209,14 @@ module.exports = {
       const newContent = applyMods(file.content, mods);
       updatedFiles.push({ path: file.path, newContent });
       log.push(
-        `[${TRANSFORMER_ID}] replaced ${plan.substitutions.length} tabset(s) in ${file.path}`
+        `[${TRANSFORMER_ID}] replaced ${acceptedSubs.length} tabset(s) in ${file.path}`
       );
     }
+
+    // Collect judgment from first patch that has one (all in same run share
+    // the same provider/model, but each candidate verdict is recorded on its
+    // patch; the transform-level judgment captures the first accepted verdict).
+    const firstJudgedPatch = patches.find((p) => p._judgment);
 
     /** @type {Transform} */
     const transform = {
@@ -167,7 +239,8 @@ module.exports = {
           : `Replaced ${patches.length} div-soup tabset(s) with the Prism ARIA Tabs widget across ${filesAffected.size} page(s).`,
       previewPath: `rebuild-preview.html#${TRANSFORMER_ID}`,
       requiresCheckpointApproval: true,
-      status: 'pending-checkpoint'
+      status: 'pending-checkpoint',
+      ...(firstJudgedPatch ? { judgment: firstJudgedPatch._judgment } : {})
     };
 
     const linkedPatches = patches.map((p, i) =>

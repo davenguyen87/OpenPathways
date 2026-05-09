@@ -64,7 +64,7 @@ const TRANSFORM_KEYS = [
   'status'
 ];
 
-const OPTIONAL_TRANSFORM_KEYS = ['checkpointApprovedBy', 'checkpointApprovedAt'];
+const OPTIONAL_TRANSFORM_KEYS = ['checkpointApprovedBy', 'checkpointApprovedAt', 'judgment'];
 
 const TRANSFORM_SCOPE_KEYS = ['files', 'manifestEdited'];
 
@@ -615,6 +615,36 @@ function validateTransformShape(t) {
   if ('checkpointApprovedAt' in t && typeof t.checkpointApprovedAt !== 'string') {
     errors.push('checkpointApprovedAt must be a string');
   }
+  if ('judgment' in t && t.judgment !== undefined) {
+    const j = t.judgment;
+    if (!j || typeof j !== 'object' || Array.isArray(j)) {
+      errors.push('transform.judgment: must be an object');
+    } else {
+      if (j.source !== 'llm') {
+        errors.push('transform.judgment.source: must be "llm"');
+      }
+      if (!['match', 'no-match', 'uncertain'].includes(j.verdict)) {
+        errors.push('transform.judgment.verdict: must be "match", "no-match", or "uncertain"');
+      }
+      if (typeof j.confidence !== 'number' || !isFinite(j.confidence)) {
+        errors.push('transform.judgment.confidence: must be a finite number');
+      }
+      if (typeof j.rationale !== 'string') {
+        errors.push('transform.judgment.rationale: must be a string');
+      }
+      for (const field of ['provider', 'model', 'promptHash', 'generatedAt']) {
+        if (typeof j[field] !== 'string' || j[field].length === 0) {
+          errors.push(`transform.judgment.${field}: must be a non-empty string`);
+        }
+      }
+      if (!j.usage || typeof j.usage !== 'object' || Array.isArray(j.usage)) {
+        errors.push('transform.judgment.usage: must be an object');
+      }
+      if (typeof j.latencyMs !== 'number' || !isFinite(j.latencyMs)) {
+        errors.push('transform.judgment.latencyMs: must be a finite number');
+      }
+    }
+  }
   return errors;
 }
 
@@ -871,6 +901,7 @@ function orderedTransform(t) {
   };
   if (t.checkpointApprovedBy !== undefined) out.checkpointApprovedBy = t.checkpointApprovedBy;
   if (t.checkpointApprovedAt !== undefined) out.checkpointApprovedAt = t.checkpointApprovedAt;
+  if (t.judgment !== undefined) out.judgment = t.judgment;
   return out;
 }
 

@@ -81,11 +81,12 @@ class PostgresStore {
   // CRUD
   // --------------------------------------------------------------------
 
-  async createJob({ id, status, options, originalName, uploadPath, createdAt, batchId, userId, uploadBytes }) {
+  async createJob({ id, status, options, originalName, uploadPath, createdAt, batchId, userId, uploadBytes, kind, parentJobId, mode }) {
     await this.pool.query(
       `INSERT INTO jobs (id, status, options, original_name, upload_path,
-                         created_at, progress_json, batch_id, user_id, upload_bytes)
-       VALUES ($1, $2, $3::jsonb, $4, $5, $6, '[]'::jsonb, $7, $8, $9)`,
+                         created_at, progress_json, batch_id, user_id, upload_bytes,
+                         kind, parent_job_id, mode)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, '[]'::jsonb, $7, $8, $9, $10, $11, $12)`,
       [
         id,
         status,
@@ -96,6 +97,9 @@ class PostgresStore {
         batchId || null,
         userId || null,
         Number.isFinite(uploadBytes) ? uploadBytes : null,
+        kind || 'audit',
+        parentJobId || null,
+        mode || null,
       ]
     );
   }
@@ -271,6 +275,20 @@ class PostgresStore {
       uploadsLast24h: Number(r2.rows[0].n || 0),
       storedBytes: Number(r3.rows[0].s || 0),
     };
+  }
+
+  /**
+   * Phase 12: count a user's in-flight rebuild jobs (pending or running).
+   * Used by the rebuild quota check in lib/quotas.js.
+   */
+  async getUserRebuildAggregate(userId) {
+    if (!userId) return { concurrentRebuilds: 0 };
+    const r = await this.pool.query(
+      `SELECT COUNT(*) AS n FROM jobs
+        WHERE user_id = $1 AND kind = 'rebuild' AND status IN ('pending', 'running')`,
+      [userId]
+    );
+    return { concurrentRebuilds: Number(r.rows[0].n || 0) };
   }
 
   // --------------------------------------------------------------------
@@ -511,6 +529,117 @@ class PostgresStore {
     };
   }
 
+  // --------------------------------------------------------------------
+  // Workspace LLM config (Phase 12.5)
+  // --------------------------------------------------------------------
+
+  /**
+   * Retrieve the workspace LLM config for a user.
+   * @param {string} userId
+   * @returns {{ userId, provider, model, encryptedApiKey, keyLast4, createdAt, updatedAt } | null}
+   */
+  async getWorkspaceLlmConfig(userId) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM workspace_llm_config WHERE user_id = $1`,
+      [userId]
+    );
+    return rows[0] ? llmConfigRowToConfig(rows[0]) : null;
+  }
+
+  /**
+   * Upsert the workspace LLM config for a user.
+   * ON CONFLICT DO UPDATE preserves created_at (it's not in the SET clause).
+   * The updated_at trigger fires automatically on the UPDATE branch.
+   *
+   * @param {string} userId
+   * @param {{ provider?: string, model?: string, encryptedApiKey: string, keyLast4: string }} config
+   */
+  async setWorkspaceLlmConfig(userId, { provider, model, encryptedApiKey, keyLast4 }) {
+    await this.pool.query(
+      `INSERT INTO workspace_llm_config
+         (user_id, provider, model, encrypted_api_key, key_last4, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         provider          = EXCLUDED.provider,
+         model             = EXCLUDED.model,
+         encrypted_api_key = EXCLUDED.encrypted_api_key,
+         key_last4         = EXCLUDED.key_last4,
+         updated_at        = NOW()`,
+      [userId, provider || 'anthropic', model || null, encryptedApiKey, keyLast4]
+    );
+  }
+
+  /**
+   * Delete the workspace LLM config for a user.
+   * @param {string} userId
+   * @returns {boolean} true if a row was deleted, false if no row existed.
+   */
+  async deleteWorkspaceLlmConfig(userId) {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM workspace_llm_config WHERE user_id = $1`,
+      [userId]
+    );
+    return rowCount > 0;
+  }
+
+  // --------------------------------------------------------------------
+  // Workspace LLM usage telemetry (Phase 12.5)
+  // --------------------------------------------------------------------
+
+  /**
+   * Record one LLM call's usage for a user.
+   *
+   * @param {{ userId, feature, model, inputTokens, outputTokens, estimatedCostUsd }} opts
+   */
+  async recordLlmUsage({ userId, feature, model, inputTokens, outputTokens, estimatedCostUsd }) {
+    const { randomUUID } = require('crypto');
+    const id = randomUUID();
+    await this.pool.query(
+      `INSERT INTO workspace_llm_usage
+         (id, user_id, feature, model, input_tokens, output_tokens, estimated_cost_usd, occurred_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+      [id, userId, feature, model, inputTokens || 0, outputTokens || 0, estimatedCostUsd || 0]
+    );
+  }
+
+  /**
+   * Aggregate LLM usage for a user over the last N milliseconds.
+   *
+   * @param {string} userId
+   * @param {number} sinceMs - epoch-ms lower bound (e.g. Date.now() - 30*86400*1000)
+   * @returns {{ totalInputTokens, totalOutputTokens, totalCostUsd, byFeature }}
+   */
+  async getLlmUsageRollup(userId, sinceMs) {
+    const sinceTs = new Date(sinceMs).toISOString();
+    const { rows } = await this.pool.query(
+      `SELECT feature,
+              SUM(input_tokens)::bigint       AS input_tokens,
+              SUM(output_tokens)::bigint      AS output_tokens,
+              SUM(estimated_cost_usd)::float8 AS cost_usd
+         FROM workspace_llm_usage
+        WHERE user_id = $1 AND occurred_at >= $2
+        GROUP BY feature`,
+      [userId, sinceTs]
+    );
+
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    const byFeature = {};
+
+    for (const row of rows) {
+      const inp = Number(row.input_tokens) || 0;
+      const out = Number(row.output_tokens) || 0;
+      const cost = Number(row.cost_usd) || 0;
+      totalInputTokens += inp;
+      totalOutputTokens += out;
+      totalCostUsd += cost;
+      byFeature[row.feature] = { tokens: inp + out, cost };
+    }
+
+    return { totalInputTokens, totalOutputTokens, totalCostUsd, byFeature };
+  }
+
   async ping() {
     await this.pool.query(`SELECT 1`);
   }
@@ -548,6 +677,11 @@ function rowToJob(row) {
     batchId: row.batch_id || null,
     userId: row.user_id || null,
     uploadBytes: row.upload_bytes != null ? Number(row.upload_bytes) : null,
+    // Phase 12: rebuild job kind + linkage. Default 'audit' for rows
+    // created before 0007 migration (kind column won't be present).
+    kind: row.kind || 'audit',
+    parentJobId: row.parent_job_id || null,
+    mode: row.mode || null,
   };
 }
 
@@ -565,6 +699,18 @@ function tsToMs(value) {
   if (typeof value === 'number') return value;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function llmConfigRowToConfig(row) {
+  return {
+    userId: row.user_id,
+    provider: row.provider,
+    model: row.model || null,
+    encryptedApiKey: row.encrypted_api_key,
+    keyLast4: row.key_last4,
+    createdAt: tsToMs(row.created_at),
+    updatedAt: tsToMs(row.updated_at),
+  };
 }
 
 module.exports = { PostgresStore };

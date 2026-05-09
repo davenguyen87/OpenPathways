@@ -193,7 +193,10 @@
   // Browser is intentionally NOT exposed: runDynamicChecks only accepts
   // chromium today — a dropdown would mislead.
   const PREFS_KEY = 'op-web-prefs.v1';
-  const DEFAULT_PREFS = { standard: 'wcag22', packageType: 'auto' };
+  // Default concurrency for parallel uploads (Phase 8b). Sequential toggle
+  // overrides this to 1 when checked.
+  const DEFAULT_CONCURRENCY = 4;
+  const DEFAULT_PREFS = { standard: 'wcag22', packageType: 'auto', concurrency: DEFAULT_CONCURRENCY, sequential: false };
 
   function loadPrefs() {
     try {
@@ -215,16 +218,39 @@
     const p = loadPrefs();
     const s = document.getElementById('opt-standard');
     const t = document.getElementById('opt-package-type');
+    const c = document.getElementById('opt-concurrency');
+    const seq = document.getElementById('opt-sequential');
     if (s) s.value = p.standard;
     if (t) t.value = p.packageType;
+    if (c) c.value = String(p.concurrency || DEFAULT_CONCURRENCY);
+    if (seq) seq.checked = !!p.sequential;
+    // When sequential is checked, concurrency input is irrelevant — dim it.
+    if (seq && c) {
+      const labelEl = document.getElementById('opt-concurrency-label');
+      seq.addEventListener('change', () => {
+        if (labelEl) labelEl.style.opacity = seq.checked ? '0.4' : '';
+      });
+      if (seq.checked && labelEl) labelEl.style.opacity = '0.4';
+    }
   }
 
   function readPrefsFromForm() {
     const s = document.getElementById('opt-standard');
     const t = document.getElementById('opt-package-type');
+    const c = document.getElementById('opt-concurrency');
+    const seq = document.getElementById('opt-sequential');
+    const sequential = seq ? seq.checked : false;
+    let concurrency = DEFAULT_CONCURRENCY;
+    if (!sequential && c) {
+      const v = parseInt(c.value, 10);
+      if (Number.isFinite(v) && v >= 1 && v <= 8) concurrency = v;
+    }
+    if (sequential) concurrency = 1;
     return {
       standard: (s && s.value) || DEFAULT_PREFS.standard,
       packageType: (t && t.value) || DEFAULT_PREFS.packageType,
+      concurrency,
+      sequential,
     };
   }
 
@@ -241,8 +267,11 @@
   }
 
   async function startBatch(files) {
-    // Phase 2: bounded XHR uploader with exponential backoff retry on 5xx.
-    // One file per request. Max 3 uploads in flight. Exits with SSE subscription.
+    // Phase 8b: parallel uploader with worker-pool pattern and backpressure.
+    // Concurrency is configurable via the "Parallel uploads" option (default 4).
+    // Sequential fallback sets concurrency=1. Per-file progress bars update in
+    // real time. 429/503 responses pause the worker lane and retry after
+    // Retry-After seconds (cap 3 retries, then mark as failed).
 
     setView('batch');
     const tbody = $('#batch-tbody');
@@ -287,55 +316,36 @@
       });
     }
 
-    // Step 3: Start bounded uploader (3 in flight)
+    // Step 3: Worker-pool parallel uploader.
+    // Each "lane" drains the queue independently; lanes pause on 429/503.
+    const CONCURRENCY = prefs.concurrency || DEFAULT_CONCURRENCY;
     const uploadQueue = files.map((f, idx) => ({ file: f, index: idx }));
-    const inFlight = new Set();
     let completedOrFailed = 0;
 
-    const doUpload = async (item) => {
-      const { file, index } = item;
-      const rowEl = tbody ? tbody.querySelector(`tr[data-tmp-id="tmp-${index}"]`) : null;
-      if (!rowEl) return; // Safety check
+    // Returns the next item from the queue, or null if exhausted.
+    const dequeue = () => uploadQueue.length > 0 ? uploadQueue.shift() : null;
 
-      const uploadFile = async () => {
-        return uploadOneFile(file, batchId, index, rowEl, prefs);
-      };
-
-      try {
-        const jobId = await uploadFile();
-        // jobId should now be on the row; updateBatchRow was called internally
-      } catch (err) {
-        // Already handled in uploadOneFile (marked as error)
-      } finally {
-        completedOrFailed++;
-        updateSubtitle(subtitle, files.length, completedOrFailed);
-        inFlight.delete(item);
-        processQueue();
-      }
-    };
-
-    const processQueue = () => {
-      while (inFlight.size < 3 && uploadQueue.length > 0) {
-        const item = uploadQueue.shift();
-        inFlight.add(item);
-        doUpload(item);
-      }
-    };
-
-    // Kick off the queue
-    processQueue();
-
-    // Poll until all uploads complete (either success or final failure)
-    await new Promise((resolve) => {
-      const checkDone = () => {
-        if (uploadQueue.length === 0 && inFlight.size === 0) {
-          resolve();
-        } else {
-          setTimeout(checkDone, 100);
+    // A single lane: drains the queue until empty.
+    const runLane = async () => {
+      let item;
+      while ((item = dequeue()) !== null) {
+        const { file, index } = item;
+        const rowEl = tbody ? tbody.querySelector(`tr[data-tmp-id="tmp-${index}"]`) : null;
+        try {
+          await uploadOneFile(file, batchId, index, rowEl, prefs);
+        } catch (_) {
+          // uploadOneFile marks the row as error internally; swallow here.
+        } finally {
+          completedOrFailed++;
+          updateSubtitle(subtitle, files.length, completedOrFailed);
         }
-      };
-      checkDone();
-    });
+      }
+    };
+
+    // Spawn N lanes and wait for all to drain.
+    const lanes = [];
+    for (let i = 0; i < CONCURRENCY; i++) lanes.push(runLane());
+    await Promise.all(lanes);
 
     // Step 4: All uploads done (success or final failure); start SSE
     if (subtitle) subtitle.textContent = `All ${files.length} uploaded — auditing…`;
@@ -347,8 +357,16 @@
     tr.appendChild(el('td', { text: String(index + 1) }));
     tr.appendChild(el('td', { class: 'batch-name', text: file.name }));
 
+    // Status cell: pill + per-file upload progress bar (Phase 8b).
     const statusCell = el('td');
-    statusCell.appendChild(statusPill('uploading'));
+    const uploadProgress = el('div', { class: 'batch-upload-progress' });
+    uploadProgress.appendChild(statusPill('uploading'));
+    const bar = el('div', { class: 'batch-upload-bar' });
+    bar.appendChild(el('div', { class: 'batch-upload-bar-fill' }));
+    const pct = el('span', { class: 'batch-upload-pct', text: '0%' });
+    uploadProgress.appendChild(bar);
+    uploadProgress.appendChild(pct);
+    statusCell.appendChild(uploadProgress);
     tr.appendChild(statusCell);
 
     tr.appendChild(el('td', { class: 'mono', text: '—' }));
@@ -359,10 +377,13 @@
   }
 
   async function uploadOneFile(file, batchId, index, rowEl, prefs) {
-    // Upload a single file with exponential backoff and 3-retry budget.
+    // Upload a single file with retry budget.
+    // - 429 / 503 (queue saturated / worker full): pause for Retry-After seconds
+    //   (default 5s) then retry. These are counted in the retry budget.
+    // - 4xx other: permanent client error, no retry.
+    // - 5xx other / network error: exponential backoff, counted in retry budget.
     // On success (200 or 202), update row with real jobId and return jobId.
     // On final failure, mark row as error.
-    // Throws on unexpected errors; caller handles via try/finally.
 
     const sha256Hex = await computeSha256(file);
     let retries = 0;
@@ -371,25 +392,34 @@
 
     while (retries < maxRetries) {
       try {
-        const result = await uploadFileOnce(file, batchId, sha256Hex);
+        const result = await uploadFileOnce(file, batchId, sha256Hex, rowEl);
         if (result.success) {
-          // HTTP 200 or 202: update row with real jobId
+          // HTTP 200 or 202: update row with real jobId, clear progress bar.
           updateBatchRowForUpload(rowEl, index, result.jobId, file.name);
           return result.jobId;
         }
-        // 4xx: don't retry, mark as error
+        // 429 / 503: backpressure — pause for Retry-After then retry this file.
+        if (result.rateLimited) {
+          retries++;
+          if (retries < maxRetries) {
+            const pauseMs = result.retryAfterMs || 5000;
+            await new Promise((res) => setTimeout(res, pauseMs));
+          }
+          continue;
+        }
+        // Other 4xx: permanent client error, no retry.
         if (result.clientError) {
           updateBatchRowForError(rowEl, result.error || 'Client error');
           return null;
         }
-        // 5xx: retry
+        // 5xx other: retryable with exponential backoff.
         retries++;
         if (retries < maxRetries) {
           await new Promise((res) => setTimeout(res, backoffMs));
           backoffMs = Math.min(30000, backoffMs * 2);
         }
       } catch (err) {
-        // Network error: counts as retryable
+        // Network error: counts as retryable.
         retries++;
         if (retries < maxRetries) {
           await new Promise((res) => setTimeout(res, backoffMs));
@@ -398,53 +428,73 @@
       }
     }
 
-    // Exhausted retries
+    // Exhausted retries.
     updateBatchRowForError(rowEl, 'Upload failed after 3 retries');
     return null;
   }
 
-  async function uploadFileOnce(file, batchId, sha256Hex) {
-    // One XHR attempt. Returns { success, clientError, jobId, error }.
+  async function uploadFileOnce(file, batchId, sha256Hex, rowEl) {
+    // One XHR attempt. Returns:
+    //   { success, jobId }             — HTTP 200 or 202
+    //   { rateLimited, retryAfterMs }  — HTTP 429 or 503 (backpressure)
+    //   { clientError, error }         — HTTP 4xx other (no retry)
+    //   { error }                      — HTTP 5xx / network (retryable)
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       const form = new FormData();
       form.append('package', file);
 
+      // Per-file progress bar: update fill and percentage text.
       xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
+        if (e.lengthComputable && rowEl) {
           const pct = Math.round((e.loaded / e.total) * 100);
-          // Could update row's progress bar here if DOM is available
+          const fill = rowEl.querySelector('.batch-upload-bar-fill');
+          const pctEl = rowEl.querySelector('.batch-upload-pct');
+          if (fill) fill.style.width = `${pct}%`;
+          if (pctEl) pctEl.textContent = `${pct}%`;
         }
       });
 
       xhr.addEventListener('load', () => {
         if (xhr.status === 200 || xhr.status === 202) {
+          // Clear progress bar to 100% on success.
+          if (rowEl) {
+            const fill = rowEl.querySelector('.batch-upload-bar-fill');
+            const pctEl = rowEl.querySelector('.batch-upload-pct');
+            if (fill) fill.style.width = '100%';
+            if (pctEl) pctEl.textContent = '100%';
+          }
           try {
             const data = JSON.parse(xhr.responseText);
-            resolve({ success: true, jobId: data.jobId, clientError: false });
+            resolve({ success: true, jobId: data.jobId });
           } catch (_) {
-            resolve({ success: false, clientError: false, error: 'Invalid response' });
+            resolve({ error: 'Invalid response' });
           }
+        } else if (xhr.status === 429 || xhr.status === 503) {
+          // Backpressure: worker queue saturated. Pause and retry.
+          const retryHeader = xhr.getResponseHeader('Retry-After');
+          const retryAfterMs = retryHeader ? parseFloat(retryHeader) * 1000 : 5000;
+          resolve({ rateLimited: true, retryAfterMs });
         } else if (xhr.status >= 400 && xhr.status < 500) {
-          // 4xx: client error, don't retry
+          // Other 4xx: client error, no retry.
           let msg = `HTTP ${xhr.status}`;
           try {
             const data = JSON.parse(xhr.responseText);
             msg = errorText(data, msg);
           } catch (_) {}
-          resolve({ success: false, clientError: true, error: msg });
+          resolve({ clientError: true, error: msg });
         } else {
-          // 5xx or other: retryable
-          resolve({ success: false, clientError: false, error: `HTTP ${xhr.status}` });
+          // 5xx other or unexpected: retryable.
+          resolve({ error: `HTTP ${xhr.status}` });
         }
       });
 
       xhr.addEventListener('error', () => {
-        resolve({ success: false, clientError: false, error: 'Network error' });
+        resolve({ error: 'Network error' });
       });
 
       xhr.addEventListener('abort', () => {
-        resolve({ success: false, clientError: false, error: 'Upload aborted' });
+        resolve({ error: 'Upload aborted' });
       });
 
       xhr.open('POST', `/api/batches/${batchId}/files`);
@@ -1729,6 +1779,14 @@ async function loadCurrentUser() {
       await loadCurrentUser();
       if (!auth.user) { showLoginView(); return; }
     }
+
+    // Phase 12: rebuild detail route /rebuild/:id.
+    const rebuildId = parseRebuildLocation();
+    if (rebuildId) {
+      loadRebuildView(rebuildId, null);
+      return;
+    }
+
     const where = parseLocation();
     if (where.kind === 'idle') {
       setView('idle');
@@ -1772,6 +1830,735 @@ async function loadCurrentUser() {
       // Replay-on-subscribe in the server gives us back the buffered events.
       subscribe(where.id);
     }
+  }
+
+  // ================================================================
+  // REBUILD — CTA, mode picker, detail view, checkpoint, undo
+  // (Phase 12 frontend)
+  // ================================================================
+
+  // Rebuild state: the currently-displayed rebuild job id.
+  const rebuildState = {
+    jobId: null,       // rebuild job id (kind='rebuild')
+    sourceJobId: null, // parent audit job id
+    eventSource: null,
+    manifest: null,    // last fetched rebuild manifest/snapshot
+    checkpointDecisions: {}, // { [transformId]: 'approve'|'reject' }
+  };
+
+  // -------------------------------------------------------------- routing helpers
+
+  function parseRebuildLocation() {
+    const m = location.pathname.match(/^\/rebuild\/([0-9a-fA-F-]{36})\/?$/);
+    if (!m) return null;
+    return m[1];
+  }
+
+  function pushRebuildUrl(rebuildId) {
+    const url = `/rebuild/${rebuildId}`;
+    if (location.pathname !== url) {
+      history.pushState({ rebuildId }, '', url);
+    }
+  }
+
+  // -------------------------------------------------------------- open rebuild modal
+
+  function openRebuildModal(auditJobId) {
+    const modal = document.getElementById('rebuild-modal');
+    if (!modal) return;
+    // Reset radio to 'safe'
+    const radios = modal.querySelectorAll('input[name="rebuild-tier"]');
+    radios.forEach((r) => { r.checked = r.value === 'safe'; });
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    // Store source job id on the confirm button for use in handler.
+    const confirm = document.getElementById('rebuild-modal-confirm');
+    if (confirm) confirm.dataset.auditJobId = auditJobId;
+  }
+
+  function closeRebuildModal() {
+    const modal = document.getElementById('rebuild-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+  }
+
+  async function startRebuild() {
+    const confirm = document.getElementById('rebuild-modal-confirm');
+    if (!confirm) return;
+    const auditJobId = confirm.dataset.auditJobId;
+    if (!auditJobId) return;
+
+    const radios = document.querySelectorAll('input[name="rebuild-tier"]');
+    let mode = 'safe';
+    radios.forEach((r) => { if (r.checked) mode = r.value; });
+
+    confirm.setAttribute('disabled', '');
+    confirm.textContent = 'Starting…';
+
+    let resp;
+    try {
+      resp = await fetch(`/api/jobs/${auditJobId}/rebuild`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+    } catch (err) {
+      confirm.removeAttribute('disabled');
+      confirm.textContent = 'Start rebuild';
+      toast(`Rebuild failed to start: ${err.message}`);
+      return;
+    }
+
+    if (!resp.ok) {
+      confirm.removeAttribute('disabled');
+      confirm.textContent = 'Start rebuild';
+      let msg = `Rebuild failed (HTTP ${resp.status})`;
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
+      toast(msg);
+      return;
+    }
+
+    const data = await resp.json();
+    closeRebuildModal();
+    confirm.removeAttribute('disabled');
+    confirm.textContent = 'Start rebuild';
+
+    // Navigate to rebuild detail view.
+    rebuildState.sourceJobId = auditJobId;
+    pushRebuildUrl(data.jobId);
+    loadRebuildView(data.jobId, auditJobId);
+  }
+
+  // -------------------------------------------------------------- rebuild detail view
+
+  async function loadRebuildView(rebuildJobId, sourceJobId) {
+    setView('rebuild');
+    rebuildState.jobId = rebuildJobId;
+    if (sourceJobId) rebuildState.sourceJobId = sourceJobId;
+    rebuildState.manifest = null;
+    rebuildState.checkpointDecisions = {};
+
+    // Reset UI panels.
+    const donePanel = document.getElementById('rebuild-done-panel');
+    const checkpointPanel = document.getElementById('rebuild-checkpoint');
+    const progressBar = document.getElementById('rebuild-progress-bar');
+    const progressLog = document.getElementById('rebuild-progress-log');
+    const headerActions = document.getElementById('rebuild-header-actions');
+
+    if (donePanel) donePanel.classList.add('hidden');
+    if (checkpointPanel) checkpointPanel.classList.add('hidden');
+    if (progressBar) progressBar.classList.remove('hidden');
+    if (progressLog) { progressLog.classList.remove('hidden'); progressLog.innerHTML = ''; }
+    if (headerActions) headerActions.innerHTML = '';
+
+    const title = document.getElementById('rebuild-title');
+    if (title) title.textContent = 'Rebuild';
+    const subtitle = document.getElementById('rebuild-subtitle');
+    if (subtitle) subtitle.textContent = 'Connecting…';
+
+    // Fetch snapshot first.
+    let snap;
+    try {
+      const r = await fetch(`/api/rebuilds/${rebuildJobId}`);
+      if (r.status === 404) { showError('Rebuild job not found.'); return; }
+      snap = await r.json();
+    } catch (err) {
+      showError(`Cannot reach server: ${err.message}`);
+      return;
+    }
+
+    rebuildState.manifest = snap;
+    updateRebuildHeader(snap);
+
+    if (snap.status === 'done' || snap.status === 'promoted') {
+      onRebuildDone(snap);
+    } else if (snap.status === 'staged') {
+      onRebuildStaged(snap);
+    } else if (snap.status === 'error') {
+      showError(`Rebuild failed: ${snap.error || 'unknown error'}`);
+    } else {
+      // pending / running — subscribe SSE.
+      subscribeRebuildEvents(rebuildJobId);
+    }
+  }
+
+  function updateRebuildHeader(snap) {
+    const title = document.getElementById('rebuild-title');
+    if (title) {
+      const mode = (snap.options && snap.options.mode) || (snap.mode) || 'safe';
+      const name = snap.originalName || snap.filename || `(job ${(snap.id||'').slice(0,8)})`;
+      title.textContent = `Rebuild — ${name}`;
+    }
+    const subtitle = document.getElementById('rebuild-subtitle');
+    if (subtitle) {
+      const mode = (snap.options && snap.options.mode) || (snap.mode) || 'safe';
+      subtitle.textContent = `Mode: ${mode} · Status: ${snap.status}`;
+    }
+  }
+
+  function appendRebuildLog(msg) {
+    const log = document.getElementById('rebuild-progress-log');
+    if (!log) return;
+    document.querySelectorAll('#rebuild-progress-log li.now').forEach((li) => li.classList.remove('now'));
+    const line = el('li', { class: 'now' }, [el('span', { class: 'stage', text: msg })]);
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function subscribeRebuildEvents(rebuildJobId) {
+    if (rebuildState.eventSource) {
+      try { rebuildState.eventSource.close(); } catch (_) {}
+    }
+    const es = new EventSource(`/api/rebuilds/${rebuildJobId}/events`);
+    rebuildState.eventSource = es;
+
+    es.addEventListener('progress', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        appendRebuildLog(d.message || d.stage || JSON.stringify(d));
+        // bump progress bar crudely
+        const fill = document.getElementById('rebuild-progress-fill');
+        const bar = document.getElementById('rebuild-progress-bar');
+        if (fill && d.pct != null) {
+          fill.style.width = `${d.pct}%`;
+          if (bar) bar.setAttribute('aria-valuenow', String(d.pct));
+        }
+      } catch (_) {}
+    });
+
+    es.addEventListener('done', (e) => {
+      es.close();
+      const fill = document.getElementById('rebuild-progress-fill');
+      const bar = document.getElementById('rebuild-progress-bar');
+      if (fill) fill.style.width = '100%';
+      if (bar) bar.setAttribute('aria-valuenow', '100');
+      // Re-fetch snapshot to get final manifest + artifact URLs.
+      fetchAndShowRebuildResult(rebuildJobId);
+    });
+
+    es.addEventListener('staged', () => {
+      es.close();
+      fetchAndShowRebuildResult(rebuildJobId);
+    });
+
+    es.addEventListener('error', (e) => {
+      let msg = null;
+      try { if (e && e.data) { const j = JSON.parse(e.data); msg = errorText(j, null); } } catch (_) {}
+      if (msg) {
+        es.close();
+        showError(`Rebuild failed: ${msg}`);
+      } else if (es.readyState === EventSource.CLOSED) {
+        // Fallback: poll until terminal.
+        pollRebuildUntilTerminal(rebuildJobId);
+      }
+    });
+  }
+
+  async function pollRebuildUntilTerminal(rebuildJobId) {
+    for (let i = 0; i < 600; i++) {
+      try {
+        const r = await fetch(`/api/rebuilds/${rebuildJobId}`);
+        if (r.status === 404) { showError('Rebuild job no longer available.'); return; }
+        const snap = await r.json();
+        if (snap.status === 'done' || snap.status === 'promoted') { onRebuildDone(snap); return; }
+        if (snap.status === 'staged') { onRebuildStaged(snap); return; }
+        if (snap.status === 'error') { showError(`Rebuild failed: ${snap.error}`); return; }
+      } catch (_) {}
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+    showError('Rebuild is taking unexpectedly long; gave up watching.');
+  }
+
+  async function fetchAndShowRebuildResult(rebuildJobId) {
+    try {
+      const r = await fetch(`/api/rebuilds/${rebuildJobId}`);
+      if (!r.ok) { showError(`Could not load rebuild result (HTTP ${r.status})`); return; }
+      const snap = await r.json();
+      rebuildState.manifest = snap;
+      updateRebuildHeader(snap);
+      if (snap.status === 'staged') {
+        onRebuildStaged(snap);
+      } else {
+        onRebuildDone(snap);
+      }
+    } catch (err) {
+      showError(`Could not load rebuild result: ${err.message}`);
+    }
+  }
+
+  function onRebuildDone(snap) {
+    const progressBar = document.getElementById('rebuild-progress-bar');
+    const progressLog = document.getElementById('rebuild-progress-log');
+    const donePanel = document.getElementById('rebuild-done-panel');
+    const checkpointPanel = document.getElementById('rebuild-checkpoint');
+
+    if (progressBar) progressBar.classList.add('hidden');
+    if (progressLog) progressLog.classList.add('hidden');
+    if (checkpointPanel) checkpointPanel.classList.add('hidden');
+    if (donePanel) donePanel.classList.remove('hidden');
+
+    updateRebuildHeader(snap);
+    renderRebuildDownloads(snap);
+    renderRebuildDiff(snap);
+    renderRebuildActionsMenu(snap);
+  }
+
+  function renderRebuildDownloads(snap) {
+    const container = document.getElementById('rebuild-downloads');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const id = snap.id || rebuildState.jobId;
+    // Use the source audit job id if available (downloads may be keyed on that).
+    const sourceId = rebuildState.sourceJobId || snap.parent_job_id;
+
+    const links = [];
+    // The backend serves rebuild artifacts at /api/rebuilds/:id/* or /api/jobs/:id/*
+    // We'll use /api/rebuilds/:id/rebuilt.zip etc. since those routes exist.
+    links.push(el('a', {
+      class: 'btn btn-primary',
+      href: `/api/rebuilds/${id}/rebuilt.zip`,
+      download: 'rebuilt.zip',
+      text: 'Download rebuilt.zip',
+    }));
+    links.push(el('a', {
+      class: 'btn btn-secondary',
+      href: `/api/rebuilds/${id}/rebuild-manifest.json`,
+      download: 'rebuild-manifest.json',
+      text: 'Download manifest',
+    }));
+    links.push(el('a', {
+      class: 'btn btn-link',
+      href: `/api/rebuilds/${id}/rebuild-diff.html`,
+      target: '_blank',
+      rel: 'noopener',
+      text: 'Open diff report ↗',
+    }));
+
+    links.forEach((l) => container.appendChild(l));
+  }
+
+  async function renderRebuildDiff(snap) {
+    const wrap = document.getElementById('rebuild-diff-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    const id = snap.id || rebuildState.jobId;
+    // Fetch the diff HTML and inject in an iframe via srcdoc to sandbox it.
+    try {
+      const r = await fetch(`/api/rebuilds/${id}/rebuild-diff.html`);
+      if (!r.ok) {
+        wrap.appendChild(el('p', { class: 'muted', text: 'Diff report not yet available.' }));
+        return;
+      }
+      const html = await r.text();
+      const iframe = el('iframe', {
+        class: 'rebuild-diff-iframe',
+        title: 'Rebuild diff report',
+        sandbox: 'allow-same-origin',
+      });
+      iframe.srcdoc = html;
+      wrap.appendChild(iframe);
+    } catch (_) {
+      wrap.appendChild(el('p', { class: 'muted', text: 'Could not load diff report.' }));
+    }
+  }
+
+  function renderRebuildActionsMenu(snap) {
+    const headerActions = document.getElementById('rebuild-header-actions');
+    if (!headerActions) return;
+    headerActions.innerHTML = '';
+
+    const manifest = snap.result && snap.result.manifest ? snap.result.manifest : snap.manifest;
+    const hasTransforms = manifest && Array.isArray(manifest.transforms) && manifest.transforms.length > 0;
+    const hasPatch = manifest && Array.isArray(manifest.patches) && manifest.patches.length > 0;
+
+    if (!hasPatch && !hasTransforms) return;
+
+    // Wrap in a details/summary dropdown to match a minimal actions menu pattern.
+    const details = el('details', { class: 'rebuild-actions-menu' });
+    const summary = el('summary', { class: 'btn btn-secondary rebuild-actions-summary', text: 'Actions' });
+    details.appendChild(summary);
+
+    const menuList = el('div', { class: 'rebuild-actions-list' });
+
+    if (hasPatch) {
+      const undoPatchBtn = el('button', {
+        class: 'btn btn-link rebuild-action-item',
+        type: 'button',
+        text: 'Undo a patch',
+      });
+      undoPatchBtn.addEventListener('click', () => {
+        details.removeAttribute('open');
+        openUndoModal(snap, 'patch');
+      });
+      menuList.appendChild(undoPatchBtn);
+    }
+
+    if (hasTransforms) {
+      const undoTransformBtn = el('button', {
+        class: 'btn btn-link rebuild-action-item',
+        type: 'button',
+        text: 'Undo a transform',
+      });
+      undoTransformBtn.addEventListener('click', () => {
+        details.removeAttribute('open');
+        openUndoModal(snap, 'transform');
+      });
+      menuList.appendChild(undoTransformBtn);
+    }
+
+    details.appendChild(menuList);
+    headerActions.appendChild(details);
+  }
+
+  // -------------------------------------------------------------- checkpoint review (full-tier)
+
+  async function onRebuildStaged(snap) {
+    const progressBar = document.getElementById('rebuild-progress-bar');
+    const progressLog = document.getElementById('rebuild-progress-log');
+    const donePanel = document.getElementById('rebuild-done-panel');
+    const checkpointPanel = document.getElementById('rebuild-checkpoint');
+
+    if (progressBar) progressBar.classList.add('hidden');
+    if (progressLog) progressLog.classList.add('hidden');
+    if (donePanel) donePanel.classList.add('hidden');
+    if (checkpointPanel) checkpointPanel.classList.remove('hidden');
+
+    updateRebuildHeader(snap);
+
+    const id = snap.id || rebuildState.jobId;
+
+    // Fetch checkpoint data (transforms + previewHtml).
+    let checkData;
+    try {
+      const r = await fetch(`/api/jobs/${id}/checkpoint`);
+      if (!r.ok) {
+        const p = document.getElementById('checkpoint-transforms');
+        if (p) p.innerHTML = '<p class="muted">Could not load checkpoint data.</p>';
+        return;
+      }
+      checkData = await r.json();
+    } catch (err) {
+      const p = document.getElementById('checkpoint-transforms');
+      if (p) p.innerHTML = `<p class="muted">Error: ${err.message}</p>`;
+      return;
+    }
+
+    // Load preview into iframe via srcdoc (avoids needing a separate route).
+    const iframe = document.getElementById('checkpoint-preview-iframe');
+    if (iframe && checkData.previewHtml) {
+      iframe.srcdoc = checkData.previewHtml;
+    } else if (iframe) {
+      iframe.srcdoc = '<body style="font-family:sans-serif;padding:2rem;color:#666">No preview available.</body>';
+    }
+
+    // Render transform sidebar.
+    renderCheckpointSidebar(checkData.transforms || [], id);
+  }
+
+  function renderCheckpointSidebar(transforms, rebuildJobId) {
+    const container = document.getElementById('checkpoint-transforms');
+    if (!container) return;
+    container.innerHTML = '';
+    rebuildState.checkpointDecisions = {};
+
+    if (transforms.length === 0) {
+      container.appendChild(el('p', { class: 'muted', text: 'No transforms to review.' }));
+      // All-decided (vacuously) → enable Promote.
+      updatePromoteButton();
+      return;
+    }
+
+    transforms.forEach((t) => {
+      const row = el('div', { class: 'checkpoint-transform-row', 'data-transform-id': t.id });
+
+      // Kind + summary.
+      const kind = el('div', { class: 'checkpoint-transform-kind', text: t.kind || t.type || 'transform' });
+      const summary = el('div', { class: 'checkpoint-transform-summary', text: t.summary || '' });
+
+      // AI verdict pill.
+      const pills = el('div', { class: 'checkpoint-pills' });
+      if (t.judgment) {
+        const isConfirmed = (t.judgment === 'confirmed' || t.judgment === 'AI-CONFIRMED');
+        const pillClass = isConfirmed ? 'pill-confirmed' : 'pill-uncertain';
+        const pillText = isConfirmed ? 'AI-CONFIRMED' : 'AI-UNCERTAIN';
+        pills.appendChild(el('span', { class: `checkpoint-verdict-pill ${pillClass}`, text: pillText }));
+      }
+
+      // Decision buttons.
+      const decisionWrap = el('div', { class: 'checkpoint-decision' });
+      const approveBtn = el('button', {
+        class: 'btn btn-secondary checkpoint-approve',
+        type: 'button',
+        'aria-label': `Approve transform: ${t.kind || t.id}`,
+        text: '✓ Approve',
+      });
+      const rejectBtn = el('button', {
+        class: 'btn btn-secondary checkpoint-reject',
+        type: 'button',
+        'aria-label': `Reject transform: ${t.kind || t.id}`,
+        text: '✗ Reject',
+      });
+
+      approveBtn.addEventListener('click', () => {
+        setTransformDecision(t.id, 'approve', row, approveBtn, rejectBtn, rebuildJobId, transforms);
+      });
+      rejectBtn.addEventListener('click', () => {
+        setTransformDecision(t.id, 'reject', row, approveBtn, rejectBtn, rebuildJobId, transforms);
+      });
+
+      // If server already has a decision, reflect it.
+      if (t.decision === 'approve' || t.decision === 'approved') {
+        rebuildState.checkpointDecisions[t.id] = 'approve';
+        row.classList.add('decision-approve');
+        approveBtn.classList.add('active');
+      } else if (t.decision === 'reject' || t.decision === 'rejected') {
+        rebuildState.checkpointDecisions[t.id] = 'reject';
+        row.classList.add('decision-reject');
+        rejectBtn.classList.add('active');
+      }
+
+      decisionWrap.appendChild(approveBtn);
+      decisionWrap.appendChild(rejectBtn);
+
+      row.appendChild(kind);
+      row.appendChild(summary);
+      row.appendChild(pills);
+      row.appendChild(decisionWrap);
+      container.appendChild(row);
+    });
+
+    updatePromoteButton();
+  }
+
+  async function setTransformDecision(transformId, decision, rowEl, approveBtn, rejectBtn, rebuildJobId, allTransforms) {
+    rebuildState.checkpointDecisions[transformId] = decision;
+
+    // Update visual state immediately (optimistic).
+    rowEl.classList.toggle('decision-approve', decision === 'approve');
+    rowEl.classList.toggle('decision-reject', decision === 'reject');
+    approveBtn.classList.toggle('active', decision === 'approve');
+    rejectBtn.classList.toggle('active', decision === 'reject');
+
+    updatePromoteButton();
+
+    // Save to server (fire and forget; user can promote when ready).
+    try {
+      await fetch(`/api/jobs/${rebuildJobId}/checkpoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions: { [transformId]: decision } }),
+      });
+    } catch (_) {
+      // Non-fatal: the decisions will be re-sent on promote.
+    }
+  }
+
+  function updatePromoteButton() {
+    const container = document.getElementById('checkpoint-transforms');
+    const btn = document.getElementById('checkpoint-promote');
+    if (!btn || !container) return;
+
+    const rows = container.querySelectorAll('.checkpoint-transform-row');
+    const totalTransforms = rows.length;
+    const decidedCount = Object.keys(rebuildState.checkpointDecisions).length;
+
+    const allDecided = totalTransforms === 0 || decidedCount >= totalTransforms;
+    btn.disabled = !allDecided;
+    btn.setAttribute('aria-disabled', String(!allDecided));
+  }
+
+  async function promoteCheckpoint() {
+    const btn = document.getElementById('checkpoint-promote');
+    const errEl = document.getElementById('checkpoint-error');
+    const id = rebuildState.jobId;
+    if (!id) return;
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Promoting…'; }
+    if (errEl) { errEl.classList.add('hidden'); errEl.innerHTML = ''; }
+
+    // POST decisions, then promote.
+    try {
+      const decResp = await fetch(`/api/jobs/${id}/checkpoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions: rebuildState.checkpointDecisions }),
+      });
+      if (!decResp.ok) {
+        const j = await decResp.json().catch(() => ({}));
+        throw new Error(errorText(j, `Saving decisions failed (HTTP ${decResp.status})`));
+      }
+
+      const promoteResp = await fetch(`/api/jobs/${id}/checkpoint/promote`, { method: 'POST' });
+      const promoteData = await promoteResp.json().catch(() => ({}));
+
+      if (!promoteResp.ok || promoteData.promoted === false) {
+        const reason = promoteData.reason || errorText(promoteData, `Promote failed (HTTP ${promoteResp.status})`);
+        if (errEl) {
+          errEl.classList.remove('hidden');
+          errEl.innerHTML = '';
+          errEl.appendChild(el('strong', { text: 'Promote failed: ' }));
+          errEl.appendChild(document.createTextNode(reason));
+          if (Array.isArray(promoteData.diagnostics) && promoteData.diagnostics.length) {
+            const ul = el('ul', { class: 'promote-diagnostics' });
+            promoteData.diagnostics.forEach((d) => ul.appendChild(el('li', { text: String(d) })));
+            errEl.appendChild(ul);
+          }
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Promote rebuild'; }
+        return;
+      }
+
+      // Promoted successfully — navigate to done view.
+      toast('Promote successful!');
+      await fetchAndShowRebuildResult(id);
+
+    } catch (err) {
+      if (errEl) {
+        errEl.classList.remove('hidden');
+        errEl.textContent = err.message;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Promote rebuild'; }
+    }
+  }
+
+  // -------------------------------------------------------------- undo controls
+
+  function openUndoModal(snap, kind) {
+    const modal = document.getElementById('undo-modal');
+    const title = document.getElementById('undo-modal-title');
+    const body = document.getElementById('undo-modal-body');
+    const confirm = document.getElementById('undo-modal-confirm');
+    if (!modal || !body) return;
+
+    if (title) title.textContent = kind === 'patch' ? 'Undo a patch' : 'Undo a transform';
+    body.innerHTML = '';
+    if (confirm) { confirm.disabled = true; confirm.setAttribute('aria-disabled', 'true'); delete confirm.dataset.undoKind; delete confirm.dataset.undoId; }
+
+    const manifest = (snap.result && snap.result.manifest) ? snap.result.manifest : (snap.manifest || {});
+    const items = kind === 'patch'
+      ? (manifest.patches || [])
+      : (manifest.transforms || []);
+
+    if (items.length === 0) {
+      body.appendChild(el('p', { class: 'muted', text: `No ${kind}s available to undo.` }));
+    } else {
+      const legend = el('p', { class: 'muted', text: `Select a ${kind} to undo:` });
+      body.appendChild(legend);
+
+      const list = el('div', { class: 'undo-item-list' });
+      items.forEach((item) => {
+        const itemId = kind === 'patch' ? item.id : item.id;
+        const label = kind === 'patch'
+          ? `${item.fixer || item.id} — ${item.file || ''} ${item.line ? ':' + item.line : ''}`
+          : `${item.kind || item.type || item.id}`;
+        const desc = kind === 'patch'
+          ? (item.description || item.criterion || '')
+          : (item.summary || '');
+
+        const btn = el('button', {
+          class: 'undo-item-btn',
+          type: 'button',
+          'data-undo-id': itemId,
+          'data-undo-kind': kind,
+        }, [
+          el('span', { class: 'undo-item-label', text: label }),
+          desc ? el('span', { class: 'undo-item-desc muted', text: desc }) : null,
+        ]);
+
+        btn.addEventListener('click', () => {
+          list.querySelectorAll('.undo-item-btn').forEach((b) => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          if (confirm) {
+            confirm.disabled = false;
+            confirm.setAttribute('aria-disabled', 'false');
+            confirm.dataset.undoId = itemId;
+            confirm.dataset.undoKind = kind;
+          }
+        });
+
+        list.appendChild(btn);
+      });
+      body.appendChild(list);
+    }
+
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+
+    // Wire confirm with the current snap.
+    if (confirm) confirm.dataset.snapJobId = snap.id || rebuildState.jobId;
+  }
+
+  function closeUndoModal() {
+    const modal = document.getElementById('undo-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+  }
+
+  async function confirmUndo() {
+    const confirm = document.getElementById('undo-modal-confirm');
+    if (!confirm || confirm.disabled) return;
+    const jobId = confirm.dataset.snapJobId || rebuildState.jobId;
+    const undoId = confirm.dataset.undoId;
+    const undoKind = confirm.dataset.undoKind;
+    if (!jobId || !undoId) return;
+
+    confirm.disabled = true;
+    confirm.textContent = 'Undoing…';
+
+    const body = undoKind === 'patch' ? { patchId: undoId } : { transformId: undoId };
+
+    let resp;
+    try {
+      resp = await fetch(`/api/jobs/${jobId}/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      toast(`Undo failed: ${err.message}`);
+      confirm.disabled = false;
+      confirm.textContent = 'Undo selected';
+      return;
+    }
+
+    if (!resp.ok) {
+      let msg = `Undo failed (HTTP ${resp.status})`;
+      try { const j = await resp.json(); msg = errorText(j, msg); } catch (_) {}
+      toast(msg);
+      confirm.disabled = false;
+      confirm.textContent = 'Undo selected';
+      return;
+    }
+
+    const data = await resp.json();
+    closeUndoModal();
+    toast('Undo applied');
+
+    // Refresh the diff view and downloads.
+    if (data.diffHtml) {
+      const wrap = document.getElementById('rebuild-diff-wrap');
+      if (wrap) {
+        wrap.innerHTML = '';
+        const iframe = el('iframe', {
+          class: 'rebuild-diff-iframe',
+          title: 'Rebuild diff report (after undo)',
+          sandbox: 'allow-same-origin',
+        });
+        iframe.srcdoc = data.diffHtml;
+        wrap.appendChild(iframe);
+      }
+    }
+
+    // Re-fetch snapshot to refresh manifest + action menu.
+    fetchAndShowRebuildResult(jobId);
   }
 
   // -------------------------------------------------------------- wiring
@@ -1917,6 +2704,46 @@ async function loadCurrentUser() {
       if (e.key === 'Escape') {
         const m = document.getElementById('fix-modal');
         if (m && !m.classList.contains('hidden')) closeFixModal();
+      }
+    });
+
+    // Phase 12: rebuild CTA.
+    const rebuildCta = document.getElementById('rebuild-cta');
+    if (rebuildCta) rebuildCta.addEventListener('click', () => {
+      if (state.jobId) openRebuildModal(state.jobId);
+    });
+
+    // Phase 12: rebuild modal wiring.
+    const rebuildModalClose = document.getElementById('rebuild-modal-close');
+    if (rebuildModalClose) rebuildModalClose.addEventListener('click', closeRebuildModal);
+    const rebuildModalCancel = document.getElementById('rebuild-modal-cancel');
+    if (rebuildModalCancel) rebuildModalCancel.addEventListener('click', closeRebuildModal);
+    const rebuildModalBackdrop = document.getElementById('rebuild-modal-backdrop');
+    if (rebuildModalBackdrop) rebuildModalBackdrop.addEventListener('click', closeRebuildModal);
+    const rebuildModalConfirm = document.getElementById('rebuild-modal-confirm');
+    if (rebuildModalConfirm) rebuildModalConfirm.addEventListener('click', startRebuild);
+
+    // Phase 12: undo modal wiring.
+    const undoModalClose = document.getElementById('undo-modal-close');
+    if (undoModalClose) undoModalClose.addEventListener('click', closeUndoModal);
+    const undoModalCancel = document.getElementById('undo-modal-cancel');
+    if (undoModalCancel) undoModalCancel.addEventListener('click', closeUndoModal);
+    const undoModalBackdrop = document.getElementById('undo-modal-backdrop');
+    if (undoModalBackdrop) undoModalBackdrop.addEventListener('click', closeUndoModal);
+    const undoModalConfirm = document.getElementById('undo-modal-confirm');
+    if (undoModalConfirm) undoModalConfirm.addEventListener('click', confirmUndo);
+
+    // Phase 12: checkpoint promote button.
+    const promoteBtn = document.getElementById('checkpoint-promote');
+    if (promoteBtn) promoteBtn.addEventListener('click', promoteCheckpoint);
+
+    // Escape closes rebuild/undo modals too.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const rm = document.getElementById('rebuild-modal');
+        if (rm && !rm.classList.contains('hidden')) { closeRebuildModal(); return; }
+        const um = document.getElementById('undo-modal');
+        if (um && !um.classList.contains('hidden')) { closeUndoModal(); return; }
       }
     });
 

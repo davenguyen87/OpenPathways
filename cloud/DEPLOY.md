@@ -176,6 +176,10 @@ all four services.
 | `QUOTA_UPLOADS_PER_DAY`        | web                           | `50`                   | Max uploads per user per day. Per-user limit.                                                |
 | `QUOTA_STORED_BYTES`           | web                           | `5368709120` (5 GiB)   | Max bytes per user. Per-user limit.                                                         |
 | `QUOTA_STORED_BYTES_TOTAL`     | web                           | `0` (disabled)         | Bucket-wide cap; triggers eviction of oldest jobs when exceeded.                            |
+| `PRISM_MAX_BATCH_COUNT`        | web                           | `200`                  | Max packages per batch request. Raised from the original Phase 8 cap of 50 once CX31 capacity was verified (~200 packages, ~22 min audit-only). Set higher per-deployment if your box can support it. |
+| `DATA_ENCRYPTION_KEY`          | web + worker                  | —                      | AES-256-GCM key for encrypting workspace LLM API keys. 32+ bytes hex (e.g. `openssl rand -hex 32`). **Required** in hosted mode when Phase 12.5 per-workspace key storage is active. |
+| `WORKER_REBUILD_CONCURRENCY`   | worker                        | `2`                    | Max concurrent rebuild queue workers. Separate from `WORKER_CONCURRENCY` (audit). Lower if rebuild jobs are RAM-constrained. |
+| `QUOTA_CONCURRENT_REBUILDS`    | web                           | `1`                    | Max in-flight rebuild jobs per user. Per-user limit, separate from `QUOTA_CONCURRENT_JOBS` (audit). |
 
 **Automatically set by the compose file** (no need to override in Coolify):
 - `PRISM_MODE=hosted` — hardened multi-tenant mode.
@@ -218,6 +222,46 @@ To re-enable auth:
 1. Remove `AUTH_ADAPTER=none` from Coolify's Environment tab, OR set it to `magic-link`.
 2. Add `ALLOWLIST_EMAIL_DOMAINS` and `SMTP_*` variables.
 3. Redeploy.
+
+---
+
+## LLM features: per-workspace keys (Phase 12.5)
+
+Per-workspace BYO Anthropic API keys shipped 2026-05-08. This is distinct from the server-env path below.
+
+**`DATA_ENCRYPTION_KEY` (required in hosted mode when Phase 12.5 is active).**
+Set to a 32+ byte hex string (e.g. `openssl rand -hex 32`). Used to AES-256-GCM-encrypt workspace API keys at rest. The server refuses to start in hosted mode if this var is absent and any workspace key exists. Generate once and never rotate without a migration plan.
+
+**User-facing settings page.** Available at `/settings`. Users enter their Anthropic API key; the last four digits are displayed as a redacted summary. The key is never returned in any API response.
+
+**Key resolution priority.** Per-workspace key takes precedence over the server-level `LLM_KEY_FROM_ENV`. If the workspace key is present, audit and rebuild jobs for that user use it regardless of the server env. If absent, the server env applies (if configured).
+
+**Cost telemetry.** Token usage from v3.1 narrative, v4.1 assisted fixers, and v5.1 transformer judgment rolls into the `workspace_llm_usage` table (migration 0010). Costs are aggregated by day and surfaced as a rolling 30-day spend widget in `/settings`. No external telemetry is involved.
+
+**Migrations required for Phase 12.5:** 0009 (`workspace_llm_config` table), 0010 (`workspace_llm_usage` table). Run automatically on server start via the migration runner.
+
+---
+
+## LLM features (v3.1 narrative, server-env activation)
+
+The v3.1 engagement-narrative section in audit reports can be activated
+server-wide by setting three environment variables in Coolify's Environment
+tab. Off by default; setting `LLM_PROVIDER` is the switch.
+
+| Var | Default | Notes |
+| --- | ------- | ----- |
+| `LLM_PROVIDER` | — (off) | Set to `anthropic` to activate v3.1 narrative on every audit. When unset, reports are generated without the narrative section — no error, no fallback noise. |
+| `LLM_KEY_FROM_ENV` | — | Name of the env var that holds the API key. Required when `LLM_PROVIDER` is set. Example: `ANTHROPIC_API_KEY`. The actual key must also be present as a separate env var under that name. |
+| `LLM_MODEL` | `claude-haiku-4-5` | Override the provider's default model. Use `claude-sonnet-4-6` for higher-quality narrative at approximately 3× the token cost. |
+| `ANTHROPIC_API_KEY` (or the name you set in `LLM_KEY_FROM_ENV`) | — | The actual API key. If missing when `LLM_PROVIDER` is set, the narrative generation falls back to the no-LLM path gracefully — the report still produces, without an error. |
+
+**Cost guidance.** At the Haiku 4.5 default with standard token budgets:
+- ~$0.05 per package for v3.1 narrative.
+- ~$11 for a 200-package library audit.
+
+Switching to `claude-sonnet-4-6` multiplies cost roughly 3×.
+
+**Server-env applies a single key to every audit on the deployment.** Per-workspace BYO keys with per-user on/off control and a token-spend dashboard are now live (Phase 12.5, shipped 2026-05-08) — see § "LLM features: per-workspace keys" above. Server-env activation remains supported for deployments where a single shared key is preferred.
 
 ---
 

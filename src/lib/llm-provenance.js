@@ -1,18 +1,21 @@
 /**
- * LLM Provenance Module for Prism v3.0
+ * LLM Provenance Module
  *
- * Gating + provenance recording infrastructure for LLM-assisted findings.
- * v3.0 does NOT make real LLM calls — this is the scaffolding that v3.1+ will
- * plug providers into.
+ * Gating, validation, and provenance helpers for LLM-assisted findings (v3
+ * audit-time path) and LLM-assisted patches (v4.1 rebuild-time path).
  *
  * Design:
  * - LLM assistance is opt-in: both `llmProvider` and `llmKeyFromEnv` must be
  *   set AND the env var must be non-empty.
- * - Every assisted finding records provenance (provider, model, engagementId, timestamp).
- * - v3.0: stubAssistedSuggestion() returns null (no real call) but still records
- *   provenance with model='v3.0-stub'.
- * - v3.1+: swap stubAssistedSuggestion for real provider implementations.
+ * - v3.0 shipped the gating + provenance schema; v4.1 wires the real provider
+ *   call via `generateAssistedSuggestion()`.
+ * - Every assisted artifact carries enough provenance for a consultant to
+ *   audit exactly what the LLM saw and produced (provider, model, prompt
+ *   hash, usage, latency).
  */
+
+const crypto = require('crypto');
+const { getProvider } = require('./llm-provider');
 
 const SUPPORTED_PROVIDERS = ['anthropic', 'openai', 'azure-openai'];
 
@@ -144,39 +147,107 @@ function recordProvenance(violation, { provider, model, engagementId, timestamp 
 }
 
 /**
- * Placeholder for LLM-assisted suggestions in v3.0.
+ * SHA-256 of the rendered prompt. Lets the manifest record exactly what the
+ * LLM saw without storing the full prompt body.
  *
- * In v3.0, this always returns null (no real LLM call). Future v3.1+ providers
- * will override this with real implementations that return candidate suggestions.
- *
- * Even though it returns null, this function:
- * - Records provenance with model='v3.0-stub'
- * - Can be called in test/demo contexts to verify the provenance tracking
- * - Serves as the contract that v3.1+ providers must implement
- *
- * @param {Object} violation - The violation to get suggestions for
- * @param {Object} options - Configuration (llmProvider, llmKeyFromEnv, engagementId, etc.)
- * @returns {null} In v3.0, always null (no real suggestion)
+ * @param {string} systemPrompt
+ * @param {string} userPrompt
+ * @returns {string}  `sha256:<hex>`
  */
-function stubAssistedSuggestion(violation, options = {}) {
-  // Record provenance even though we're not making a real call
-  if (options.engagementId) {
-    recordProvenance(violation, {
-      provider: options.llmProvider || 'none',
-      model: 'v3.0-stub',
-      engagementId: options.engagementId,
-      timestamp: new Date().toISOString(),
-    });
+function hashPrompt(systemPrompt, userPrompt) {
+  const h = crypto.createHash('sha256');
+  h.update(String(systemPrompt));
+  h.update('\n---\n');
+  h.update(String(userPrompt));
+  return 'sha256:' + h.digest('hex');
+}
+
+/**
+ * Build a per-rebuild provider instance lazily. Engagement isolation: callers
+ * pass `options` carrying llmProvider, llmKeyFromEnv (the env-var name), and
+ * optionally llmModel. Returns null when LLM assistance is not enabled — the
+ * caller (an assisted fixer) skips and the violation defers.
+ *
+ * Do not memoize across rebuilds: cross-engagement leakage is the failure
+ * mode this guards against.
+ *
+ * @param {Object} options
+ * @returns {ReturnType<typeof getProvider>|null}
+ */
+function buildProviderFromOptions(options) {
+  if (!isLlmEnabled(options)) return null;
+  const apiKey = process.env[options.llmKeyFromEnv];
+  return getProvider(options.llmProvider, apiKey, {
+    model: options.llmModel,
+    maxTokens: options.llmMaxTokens,
+    timeoutMs: options.llmTimeoutMs
+  });
+}
+
+/**
+ * Generate an LLM-assisted suggestion and return it alongside the provenance
+ * fields that the patch will carry. Returns `{ ok: false, reason }` on
+ * disable, validation failure, or provider error so the caller can defer the
+ * violation rather than failing the rebuild.
+ *
+ * Output validation is the fixer's job — this function returns the raw text
+ * and only fails on transport-level errors. Length / format / redundancy
+ * checks live in the fixer next to the prompt that produced the text.
+ *
+ * @param {Object} args
+ * @param {string} args.systemPrompt
+ * @param {string} args.userPrompt
+ * @param {Object} args.options                   Caller's full options bag (llmProvider,
+ *                                                llmKeyFromEnv, llmModel, engagementId, ...).
+ * @param {Object} [args.provider]                Pre-built provider instance. When supplied,
+ *                                                `args.options` only needs the gating fields
+ *                                                used to record provenance — the provider is
+ *                                                used as-is. The orchestrator supplies one.
+ * @returns {Promise<
+ *   { ok: true, text: string, provenance: Object } |
+ *   { ok: false, reason: string }
+ * >}
+ */
+async function generateAssistedSuggestion({ systemPrompt, userPrompt, options, provider }) {
+  const prov = provider || buildProviderFromOptions(options || {});
+  if (!prov) {
+    return { ok: false, reason: '--llm-provider not set' };
   }
 
-  // v3.0: no real LLM call; returns null
-  return null;
+  let result;
+  try {
+    result = await prov.generate({
+      systemPrompt,
+      userPrompt,
+      maxTokens: options && options.llmMaxTokens
+    });
+  } catch (err) {
+    return { ok: false, reason: `LLM call failed: ${err.message}` };
+  }
+
+  if (!result || typeof result.text !== 'string' || result.text.length === 0) {
+    return { ok: false, reason: 'LLM returned empty response' };
+  }
+
+  return {
+    ok: true,
+    text: result.text,
+    provenance: {
+      provider: prov.name,
+      model: result.model,
+      promptHash: hashPrompt(systemPrompt, userPrompt),
+      usage: result.usage,
+      latencyMs: result.latencyMs
+    }
+  };
 }
 
 module.exports = {
   isLlmEnabled,
   validateLlmConfig,
   recordProvenance,
-  stubAssistedSuggestion,
+  buildProviderFromOptions,
+  generateAssistedSuggestion,
+  hashPrompt,
   SUPPORTED_PROVIDERS,
 };

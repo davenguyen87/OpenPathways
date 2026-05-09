@@ -36,6 +36,7 @@ function renderMarkdownV3(scorecard, options = {}) {
 
   const engagementRedact = options.engagementRedact || false;
   const reportTitle = getReportTitle(clientName, engagementId, engagementRedact);
+  const narrative = options.narrative || null;
 
   let md = '';
 
@@ -57,6 +58,9 @@ function renderMarkdownV3(scorecard, options = {}) {
   if (complete === false) {
     md += `> ⚠️ **AUDIT INCOMPLETE** — Dynamic checks did not run. Static findings are below, but the package has not been fully audited. Resolve the issue and re-run before relying on this report.\n\n`;
   }
+
+  // ==================== 01a ENGAGEMENT NARRATIVE (optional) ====================
+  md += renderNarrativeMarkdown(narrative);
 
   // ==================== 01 EXECUTIVE SUMMARY ====================
   md += `## 01 — Executive summary\n\n`;
@@ -400,6 +404,53 @@ function buildMethodNote(scorecard) {
   md += `**Documentation:** See the project PRD at archive/workstreams/PRD_v3_SkillLoop_Scoping.md for detailed scope and methodology.\n`;
 
   return md;
+}
+
+/**
+ * Render Section 01a — Engagement Narrative as Markdown.
+ * Returns an empty string when narrative is absent or every section is null.
+ */
+function renderNarrativeMarkdown(narrative) {
+  if (!narrative) return '';
+  const hasExecutive = narrative.executive != null;
+  const hasGuides = Array.isArray(narrative.remediationGuides) && narrative.remediationGuides.length > 0;
+  const hasScopeMemo = narrative.scopeMemo != null;
+  if (!hasExecutive && !hasGuides && !hasScopeMemo) return '';
+
+  let md = `## 01a — Engagement narrative\n\n`;
+
+  if (hasExecutive) {
+    md += `### Executive narrative\n\n`;
+    md += narrativePillMarkdown(narrative.executive.provenance);
+    md += `${narrative.executive.text}\n\n`;
+  }
+
+  if (hasGuides) {
+    md += `### Per-criterion remediation guidance\n\n`;
+    for (const guide of narrative.remediationGuides) {
+      md += `#### ${guide.criterion} ${guide.criterionName}\n\n`;
+      md += narrativePillMarkdown(guide.provenance);
+      md += `${guide.text}\n\n`;
+    }
+  }
+
+  if (hasScopeMemo) {
+    md += `### Recommended remediation order\n\n`;
+    md += narrativePillMarkdown(narrative.scopeMemo.provenance);
+    md += `${narrative.scopeMemo.text}\n\n`;
+  }
+
+  return md;
+}
+
+/**
+ * Render a provenance pill as an italic Markdown line.
+ */
+function narrativePillMarkdown(provenance) {
+  if (!provenance) return '';
+  const model = provenance.model || '';
+  const ts = (provenance.generatedAt || '').replace(/\.\d{3}Z$/, 'Z');
+  return `_AI-drafted · ${model} · ${ts} · review before sharing_\n\n`;
 }
 
 module.exports = { renderMarkdownV3 };

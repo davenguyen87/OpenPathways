@@ -26,7 +26,11 @@ const cookieParser = require('cookie-parser');
 const { launch } = require('./lib/launch');
 const { createAuditRouter } = require('./routes/audits');
 const { createBatchRouter } = require('./routes/batches');
+const { createCheckpointRouter } = require('./routes/checkpoints');
+const { createRebuildUndoRouter } = require('./routes/rebuild-undo');
+const { createRebuildRouter } = require('./routes/rebuilds');
 const { createAuthRouter } = require('./routes/auth');
+const { createWorkspaceRouter } = require('./routes/workspace');
 const { createStore } = require('./store');
 const { createStorage } = require('./storage');
 const { createAuth } = require('./auth');
@@ -281,6 +285,44 @@ function createApp({ jobs, config, auth, store, storage }) {
     csrfProtect: authEnabled ? csrfProtect : null,
   });
   app.use('/api', batchRouter);
+
+  const { router: rebuildRouter } = createRebuildRouter({
+    jobs,
+    config: cfg,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
+    store,
+    queue: null, // in-process by default; wired at boot for pg-boss mode
+  });
+  app.use('/api', rebuildRouter);
+
+  const { router: rebuildUndoRouter } = createRebuildUndoRouter({
+    jobs,
+    config: cfg,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
+    store,
+    storage,
+  });
+  app.use('/api', rebuildUndoRouter);
+
+  const { router: checkpointRouter } = createCheckpointRouter({
+    jobs,
+    config: cfg,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
+    store,
+    storage,
+  });
+  app.use('/api', checkpointRouter);
+
+  const { router: workspaceRouter } = createWorkspaceRouter({
+    store,
+    config: cfg,
+    requireAuth: (cfg.isHosted && authEnabled) ? requireAuth() : null,
+    csrfProtect: authEnabled ? csrfProtect : null,
+  });
+  app.use('/api', workspaceRouter);
 
   const publicDir = path.join(__dirname, '..', 'public');
   app.use(express.static(publicDir, { extensions: ['html'] }));

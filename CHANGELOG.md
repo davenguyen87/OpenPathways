@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-05-08
+
+### Added
+
+**Cloud rebuild surface (Phase 12)**
+- `POST /api/jobs/:id/rebuild` — queues a rebuild job (safe / assisted / full) against the audit's uploaded package. Rate limit: 10/min.
+- `GET /api/rebuilds/:id`, `GET /api/rebuilds/:id/sse` — rebuild detail + SSE progress.
+- `GET /api/jobs/:id/checkpoint`, `POST /api/jobs/:id/checkpoint` — staged transform list and per-transform approve/reject decisions. Rate limit: 60/min.
+- `POST /api/jobs/:id/checkpoint/promote` — promote staged artifacts. Re-runs `verify()`, validates manifest XML, checks SCO sequence; rolls back atomically on failure. Rate limit: 5/min.
+- `POST /api/jobs/:id/undo` — atomic transform undo. Rate limit: 10/min.
+- Worker dispatches a second `runRebuild` pg-boss queue. `WORKER_REBUILD_CONCURRENCY=2` default; separate from the audit queue.
+- `cloud/server/storage/staging.js` — staging storage adapter. 7-day TTL on un-decided staging dirs enforced by `cloud/server/lib/staging-retention.js`.
+- New job statuses: `staged`, `expired`, `promoted`.
+- Frontend: "Rebuild this audit" CTA + tier-picker modal (`cloud/public/app.js`). Rebuild detail view at `/rebuild/:id` with SSE progress. Full-tier checkpoint review UI: iframe preview + per-transform approve/reject sidebar + Promote button. Undo controls in the actions menu.
+- Integration tests covering safe + full + promote-failure rollback paths.
+- Migration 0007: `jobs.kind`, `jobs.parent_job_id`, `jobs.mode` columns.
+- New env vars: `WORKER_REBUILD_CONCURRENCY` (default `2`), `QUOTA_CONCURRENT_REBUILDS` (default `1`).
+
+**Per-workspace LLM keys (Phase 12.5)**
+- `GET/PUT/DELETE /api/workspace/llm-config` — workspace LLM key CRUD. `POST /api/workspace/llm-config/test` — live connectivity check.
+- `cloud/server/lib/crypto.js` — AES-256-GCM helpers for key encryption at rest.
+- `cloud/server/lib/llm-key-resolver.js` — resolves the LLM key for a request: workspace key (decrypted) takes precedence over server `LLM_KEY_FROM_ENV`. Injects as `PRISM_RESOLVED_LLM_KEY` sentinel env var for the audit/rebuild call.
+- `cloud/server/lib/llm-cost.js` — Anthropic pricing table for Haiku 4.5 / Sonnet 4.6 / Opus 4.7.
+- `cloud/server/lib/llm-usage-recorder.js` — walks provenance objects from audit/rebuild output and persists token-usage rows.
+- Settings page at `/settings` (`cloud/public/settings.html`, `cloud/public/settings.js`): provider picker, key input, last-4-digit redacted display, save / test / delete, rolling 30-day cost widget.
+- Migration 0009: `workspace_llm_config` table (`user_id`, `provider`, `model`, `encrypted_api_key`, `key_last4`).
+- Migration 0010: `workspace_llm_usage` table (`user_id`, `date`, `input_tokens`, `output_tokens`, `estimated_cost_usd`).
+- New env var: `DATA_ENCRYPTION_KEY` (required in hosted mode; 32+ byte hex).
+
+**Parallel browser upload (Phase 8b)**
+- Browser uploader runs N concurrent uploads (configurable; default 4) with sequential fallback.
+- Per-file progress bars; completion order preserved in the batch rollup.
+- 413 `batch_count_exceeded` message reflects the current `PRISM_MAX_BATCH_COUNT` value, not a baked-in constant.
+
+**Cloud LLM coverage follow-up**
+- `cloud/server/routes/reports.js` `report.md` endpoint now forwards `LLM_PROVIDER` / `LLM_KEY_FROM_ENV` / `LLM_MODEL` environment vars, closing a Wave 1 gap where `report.html` had the v3.1 narrative but `report.md` did not.
+
+## [5.1.0] - 2026-05-08
+
+### Added
+
+**v3.1 — Audit Narrative**
+- New `src/lib/audit-narrative.js` generates three LLM-drafted prose sections (executive narrative, per-criterion remediation guides, recommended remediation order) from the audit scorecard. Output shape: `AuditNarrative` JSON, schema 1.0.0.
+- Library audits (`audit-library`) get a `generateLibrarySynthesis()` call that produces a cross-package synthesis block at the top of both rollup renderers.
+- `src/reporter/html.js`, `src/reporter/markdown-v3.js`, and `src/lib/library-rollup.js` render the new "Section 01a — Engagement Narrative" slot with a brand-matched provenance pill (`AI-DRAFTED · <model> · <timestamp> · review before sharing`).
+- `src/reporter/index.js` (`writeReports`) accepts and forwards the `narrative` field to renderers.
+- `src/index.js` calls `generateNarrative()` after audit, before `writeReports`. Gated on `options.llmProvider` and `options.llmNarrative !== false`.
+- New CLI flags on `audit` and `audit-library`: `--llm-model <id>`, `--no-llm-narrative`, `--llm-narrative-token-budget <n>` (default 30000), `--llm-narrative-criterion-cap <n>` (default 12). Default model alias: `claude-haiku-4-5`.
+- `results.json` carries an `auditNarrative` object when narrative ran; field absent otherwise. Reports without narrative remain byte-identical to v3 output.
+
+**v4.1 — Assisted-Tier Rebuild**
+- New runtime dependency: `@anthropic-ai/sdk`.
+- New `src/lib/llm-provider.js` — provider abstraction. `getProvider('anthropic', apiKey, opts)` returns `{ name, model, generate(opts) }`. OpenAI/Azure-OpenAI stubs reserved for v4.2.
+- `src/lib/llm-provenance.js` replaces `stubAssistedSuggestion()` with a real `generateAssistedSuggestion()`; adds `hashPrompt` and `buildProviderFromOptions` helpers. Deprecated stub alias kept for one release.
+- Three new assisted-tier fixers: `src/fixers/generate-alt-text.js` (1.1.1), `src/fixers/rewrite-link-text.js` (2.4.4), `src/fixers/generate-form-label.js` (3.3.2). Each defers cleanly when LLM is off. Every assisted patch carries `tier: 'assisted'`, `confidence: 'needs-review'`, and full LLM provenance (`source`, `model`, `promptHash`, `usage`, `latencyMs`).
+- New check `src/checks/2-4-4-link-purpose.js` (vague link text; no check existed before v4.1).
+- `src/rebuild/index.js`: `loadFixers` now accepts a `tiers[]` array; early-exit assisted stub removed; provider threaded into fixer context via `packageContext.provider`.
+- `src/lib/rebuild-cli.js`: early-exit assisted stub removed; `--llm-provider` and `--llm-key-from-env` forwarded.
+- New CLI flags on `rebuild` and `rebuild-library`: `--llm-provider`, `--llm-key-from-env`, `--llm-model` (already existed on `audit`), `--llm-token-budget <n>` (default 50000). Manifest schema stays 1.0.0.
+
+**v5.1 — Transformer Judgment**
+- New `src/lib/transformer-judgment.js` — exports `classifyWidget` (strict-JSON-output LLM widget classification) and `parseAndValidateVerdict`. Returns `{ ok, verdict, confidence, rationale, provenance }` per candidate.
+- All four widget-replacement transformers (`src/transformers/widget-replacement-{tabs,accordion,carousel,dialog}.js`) call `classifyWidget` per heuristic candidate when `packageContext.provider` is set. Candidates the LLM rejects (`verdict: 'no-match'`) are skipped; a deferred entry records the reason.
+- `src/rebuild/types.js` and `src/rebuild/manifest.js` extended: Transform record gains optional `judgment` field. Manifest schema stays 2.0.0; v5.0 readers ignore the unknown field.
+- `src/reporter/rebuild-preview.js` renders `AI-CONFIRMED`/`AI-UNCERTAIN` pill (with confidence %) and AI rationale row beneath each transform card. Deferred-list section shows LLM-rejected candidates so consultants can re-run with `--no-llm-judgment` if the rejection looks wrong.
+- `src/rebuild/index.js` now (a) copies the optional `judgment` field through `transformRecord` and (b) propagates `result.deferred` from transformers (both were v5 leaks fixed as a side effect of this workstream).
+- New CLI flags on `rebuild` and `rebuild-library`: `--no-llm-judgment` (default on when `--llm-provider` set), `--llm-judgment-token-budget <n>` (default 20000), `--llm-judgment-confidence-threshold <0..1>` (default 0.7).
+
+**Cloud (Prism.skill-loop.com)**
+- `cloud/server/routes/audits.js` forwards `LLM_PROVIDER` / `LLM_KEY_FROM_ENV` / `LLM_MODEL` from the server's environment into `writeReports`, activating v3.1 engagement narratives server-wide when those vars are set.
+- `cloud/server/routes/batches.js` `MAX_BATCH_COUNT` is now env-configurable via `PRISM_MAX_BATCH_COUNT`; default raised from 50 to 200.
+- `cloud/ROADMAP.md` adds Phase 12.5 (per-workspace BYO LLM keys, ~4 days), Phase 8b (parallel upload, ~1 day), and a measured Capacity baseline for the CX31 (audit ~1–20 s/pkg; full rebuild ~8–75 s/pkg; v3.1 narrative ~$0.054/pkg at Haiku 4.5 defaults).
+
 ## [5.0.0] - 2026-05-08
 
 ### Added

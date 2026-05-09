@@ -94,7 +94,8 @@ cloud/
 **Quotas.**
 - Per-user: max 2 concurrent jobs, 50 uploads/day, 5 GB stored bytes
   (defaults; configurable per user later).
-- Worker: `WORKER_CONCURRENCY=3` Playwright runs (8 GB box headroom).
+- Rebuild quota: `QUOTA_CONCURRENT_REBUILDS=1` (separate from audit concurrency).
+- Worker: `WORKER_CONCURRENCY=3` Playwright audit runs; `WORKER_REBUILD_CONCURRENCY=2` rebuild runs (both 8 GB box headroom).
 - Disk eviction: when total bucket > 80% of cap, oldest jobs evicted early.
 
 **Observability.**
@@ -176,6 +177,8 @@ clearly. Each entry: phase, file, one-line reason.
 
 - Phase 6, `src/index.js` — added `options.signal` (AbortSignal) for real cancellation; replaced the per-call `process.on('exit')` listener with a single module-level handler + `Set<tempRoot>` so 200 sequential audits no longer leak listeners.
 - Phase 6, `src/lib/run-dynamic-checks.js` — accepts `options.signal`; closes the Playwright browser eagerly on abort and throws `AbortError` at inter-page / inter-check boundaries so cancel-to-stop is ~1 second mid-Playwright.
+- Phase 12.5 (partial, 2026-05-08), **no `/src` changes** — v3.1 LLM activation was cloud-only. Changes were entirely in `cloud/server/routes/audits.js` (forwards `LLM_PROVIDER` / `LLM_KEY_FROM_ENV` / `LLM_MODEL` to the existing `writeReports` call) and `cloud/server/routes/batches.js` (batch cap now reads `PRISM_MAX_BATCH_COUNT` from env instead of hard-coding 50).
+- Phase 12 (2026-05-08), **no `/src` changes** — the cloud rebuild surface reuses the existing `src/rebuild/index.js`, `src/rebuild/checkpoint.js`, `src/transformers/`, and `src/reporter/rebuild-preview.js` engine unchanged. All new code lives in `cloud/server/routes/` (rebuilds.js, checkpoints.js, rebuild-undo.js), `cloud/server/storage/staging.js`, `cloud/server/lib/staging-retention.js`, and `cloud/worker/` (second queue dispatch).
 
 ---
 
@@ -183,17 +186,42 @@ clearly. Each entry: phase, file, one-line reason.
 
 - Phases 5–10 shipped: persistence, real cancellation (`AbortSignal`), baseline diff + auto-fix in the UI, batch upload, hosted hardening (helmet + rate limit + magic-link + quotas + retention), Docker image, Coolify deploy.
 - Phase 11 (later items: Stripe billing, admin UI, trends dashboard) preserved in `ROADMAP.md` as historical context, not currently active.
+- Phases 12, 12.5, and 8b shipped 2026-05-08. See `ROADMAP.md` for per-phase status lines.
 - `/web` Phases 1–4 complete; serves as reference implementation.
 
-## Rebuild surfaces (v4 / v5) — not yet exposed in cloud
+## Rebuild surfaces (v4 / v5)
 
-The CLI now ships a full rebuild pipeline: safe-tier (deterministic mechanical fixes), assisted-tier (LLM-generated content — provider abstraction pending), full-tier (landmark insertion, widget replacement, page splitting, gated behind a `rebuild-checkpoint approve` step). See `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md`.
+The cloud now exposes the full rebuild pipeline. Safe-tier and full-tier rebuilds run in the cloud worker (separate pg-boss queue, `WORKER_REBUILD_CONCURRENCY=2` default); the full-tier checkpoint review UI is browser-based.
 
-Cloud rebuild adoption is **deferred by design** — the engine + CLI shipped first. When cloud picks rebuild up, the surfaces it will need:
+**Endpoints (all require auth, owner-scoped):**
+- `POST /api/jobs/:id/rebuild` — queue a rebuild against the audit's uploaded package. Body: `{ mode: 'safe'|'assisted'|'full' }`. Rate limit: 10/min.
+- `GET /api/rebuilds/:id` — rebuild job detail (JSON).
+- `GET /api/rebuilds/:id/sse` — SSE progress stream.
+- `GET /api/jobs/:id/checkpoint` — staged transform list + state for full-tier.
+- `POST /api/jobs/:id/checkpoint` — submit per-transform approve/reject decisions. Rate limit: 60/min.
+- `POST /api/jobs/:id/checkpoint/promote` — promote staged artifacts after decisions are recorded. Rate limit: 5/min. Runs `verify()`, validates manifest XML, walks SCO sequence; rolls back atomically on failure.
+- `POST /api/jobs/:id/undo` — atomic transform undo. Rate limit: 10/min.
 
-- Multi-tenant rebuild jobs (queue + worker; rebuild is heavier than audit because of the per-package transformer pass).
-- Browser-side checkpoint UI (the consultant reviews `rebuild-preview.html` and POSTs approve/reject decisions).
-- Per-engagement isolation for `.rebuild-staging/` directories on the storage adapter.
-- Atomic transform undo wired into the existing job-history surface.
+**Frontend surfaces (shipped 2026-05-08):**
+- "Rebuild this audit" CTA in the job history pane; tier-picker modal (safe / assisted / full).
+- Rebuild detail view at `/rebuild/:id` with SSE progress.
+- Full-tier checkpoint review: iframe preview of `rebuild-preview.html` + sidebar listing transforms with per-transform approve/reject toggles + Promote button.
+- Undo controls in the job actions menu.
+- Settings page at `/settings` (`cloud/public/settings.html`, `settings.js`).
 
-Don't build any of this from cloud work without flagging it as a new phase in `ROADMAP.md`.
+**Storage:**
+- Staging dirs live under the per-job bucket prefix. 7-day TTL on un-decided staging (enforced by `staging-retention.js`); promoted artifacts honor the normal engagement retention window.
+- New job statuses: `staged`, `expired`, `promoted`.
+
+**New env vars (rebuild-related):**
+- `WORKER_REBUILD_CONCURRENCY` — max concurrent rebuild queue workers (default `2`).
+- `QUOTA_CONCURRENT_REBUILDS` — per-user in-flight rebuild cap (default `1`).
+- `DATA_ENCRYPTION_KEY` — AES-256-GCM key for workspace LLM key encryption (32+ bytes hex; required in hosted mode with Phase 12.5 active).
+
+## LLM features in cloud
+
+**Server-env activation (v3.1 narrative, live since Wave 1):** set `LLM_PROVIDER`, `LLM_KEY_FROM_ENV`, and `LLM_MODEL` in the deployment's environment. Both `report.html` and `report.md` endpoints now forward these vars (the `report.md` gap was fixed as a Wave 1 follow-up). See `DEPLOY.md` § "LLM features (v3.1 narrative, server-env activation)".
+
+**Per-workspace BYO keys (Phase 12.5, shipped 2026-05-08):** users store their own Anthropic API key via the Settings page at `/settings`. Key is encrypted at rest with AES-256-GCM (`DATA_ENCRYPTION_KEY`). Key resolution priority: workspace key > server `LLM_KEY_FROM_ENV`. The workspace key activates v3.1 narrative, v4.1 assisted fixers, and v5.1 transformer judgment for that user's rebuild jobs. Token usage rolls into `workspace_llm_usage` for the cost dashboard in Settings. See `ROADMAP.md` § Phase 12.5 for the full spec.
+
+New migrations: `0007` (jobs.kind / parent_job_id / mode), `0009` (workspace_llm_config), `0010` (workspace_llm_usage).

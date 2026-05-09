@@ -15,6 +15,7 @@ function renderHtml(scorecard, options = {}) {
     consultantName = 'Auditor',
     packageCount = 1,
     redactClientName = false,
+    narrative = null,
   } = options;
 
   const displayClientName = redactClientName ? engagementId : clientName;
@@ -560,6 +561,39 @@ body {
 .map-table tr.row-clean td.count { color: var(--sev-ok); }
 .map-table tr.row-bad td.count   { color: var(--sev-critical); }
 
+/* ---- ai provenance pill ---- */
+.ai-pill {
+  display: inline-block;
+  margin: 6px 0 16px;
+  padding: 4px 10px;
+  background: var(--paper-3);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ---- section 01a narrative ---- */
+.narrative-block { margin-bottom: 32px; }
+.narrative-block h3 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 16px; margin: 0 0 2px;
+  color: var(--ink);
+}
+.narrative-block .narrative-text {
+  font-size: 15px; line-height: 1.65; color: var(--ink-2);
+  max-width: 80ch;
+  white-space: pre-wrap;
+}
+.narrative-criterion { margin-bottom: 24px; }
+.narrative-criterion h4 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 15px; margin: 0 0 2px;
+  color: var(--ink);
+}
+
 /* ---- method note ---- */
 .method-note {
   background: var(--paper-2);
@@ -635,7 +669,7 @@ footer.report-foot {
     <h1>${displayClientName}<br>Library accessibility assessment</h1>
     <p class="lede">${packageCount > 1 ? `An audit of ${packagesAudited} SCORM packages` : 'Package accessibility assessment'} scoped against ${wcagVersion} and Section 508. This document accompanies the broader engagement assessment and feeds the remediation plan.</p>
   </div>
-
+${renderNarrativeSection(narrative)}
   <!-- SECTION 01: EXECUTIVE SUMMARY -->
   <hr class="rule solid">
   <section>
@@ -1035,6 +1069,92 @@ function renderSection508Map(mapData) {
       </tr>
     `;
   }).join('');
+}
+
+/**
+ * Escape HTML special characters to prevent injection.
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Render a single AI provenance pill.
+ */
+function renderAiPill(provenance) {
+  if (!provenance) return '';
+  const model = escapeHtml(provenance.model || '');
+  const ts = escapeHtml((provenance.generatedAt || '').replace(/\.\d{3}Z$/, 'Z'));
+  return `<div class="ai-pill" role="note">AI-DRAFTED · ${model} · ${ts} · review before sharing</div>`;
+}
+
+/**
+ * Render Section 01a — Engagement Narrative block.
+ * Returns an empty string when narrative is absent or every section is null.
+ */
+function renderNarrativeSection(narrative) {
+  if (!narrative) return '';
+  const hasExecutive = narrative.executive != null;
+  const hasGuides = Array.isArray(narrative.remediationGuides) && narrative.remediationGuides.length > 0;
+  const hasScopeMemo = narrative.scopeMemo != null;
+  if (!hasExecutive && !hasGuides && !hasScopeMemo) return '';
+
+  let html = `
+  <!-- SECTION 01a: ENGAGEMENT NARRATIVE -->
+  <hr class="rule solid">
+  <section>
+    <header class="sec-hd">
+      <span class="kicker">01a — Engagement narrative</span>
+      <h2>AI-drafted narrative</h2>
+    </header>
+`;
+
+  if (hasExecutive) {
+    html += `
+    <div class="narrative-block">
+      <h3>Executive narrative</h3>
+      ${renderAiPill(narrative.executive.provenance)}
+      <div class="narrative-text">${escapeHtml(narrative.executive.text)}</div>
+    </div>
+`;
+  }
+
+  if (hasGuides) {
+    html += `
+    <div class="narrative-block">
+      <h3>Per-criterion remediation guidance</h3>
+`;
+    for (const guide of narrative.remediationGuides) {
+      const label = escapeHtml(`${guide.criterion} ${guide.criterionName}`);
+      html += `
+      <div class="narrative-criterion">
+        <h4>${label}</h4>
+        ${renderAiPill(guide.provenance)}
+        <div class="narrative-text">${escapeHtml(guide.text)}</div>
+      </div>
+`;
+    }
+    html += `    </div>\n`;
+  }
+
+  if (hasScopeMemo) {
+    html += `
+    <div class="narrative-block">
+      <h3>Recommended remediation order</h3>
+      ${renderAiPill(narrative.scopeMemo.provenance)}
+      <div class="narrative-text">${escapeHtml(narrative.scopeMemo.text)}</div>
+    </div>
+`;
+  }
+
+  html += `  </section>\n`;
+  return html;
 }
 
 module.exports = { renderHtml };

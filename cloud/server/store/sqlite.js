@@ -87,12 +87,13 @@ class SqliteStore {
   // CRUD
   // --------------------------------------------------------------------
 
-  async createJob({ id, status, options, originalName, uploadPath, createdAt, batchId, userId, uploadBytes }) {
+  async createJob({ id, status, options, originalName, uploadPath, createdAt, batchId, userId, uploadBytes, kind, parentJobId, mode }) {
     this.db
       .prepare(
         `INSERT INTO jobs (id, status, options, original_name, upload_path,
-                           created_at, progress_json, batch_id, user_id, upload_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)`
+                           created_at, progress_json, batch_id, user_id, upload_bytes,
+                           kind, parent_job_id, mode)
+         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -103,7 +104,10 @@ class SqliteStore {
         createdAt,
         batchId || null,
         userId || null,
-        Number.isFinite(uploadBytes) ? uploadBytes : null
+        Number.isFinite(uploadBytes) ? uploadBytes : null,
+        kind || 'audit',
+        parentJobId || null,
+        mode || null
       );
   }
 
@@ -324,6 +328,21 @@ class SqliteStore {
     };
   }
 
+  /**
+   * Phase 12: count a user's in-flight rebuild jobs (pending or running).
+   * Used by the rebuild quota check in lib/quotas.js.
+   */
+  async getUserRebuildAggregate(userId) {
+    if (!userId) return { concurrentRebuilds: 0 };
+    const concurrentRebuilds = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM jobs
+          WHERE user_id = ? AND kind = 'rebuild' AND status IN ('pending', 'running')`
+      )
+      .get(userId).n || 0;
+    return { concurrentRebuilds: Number(concurrentRebuilds) };
+  }
+
   // --------------------------------------------------------------------
   // Auth (Phase 9B)
   // --------------------------------------------------------------------
@@ -527,6 +546,132 @@ class SqliteStore {
   }
 
   // --------------------------------------------------------------------
+  // Workspace LLM config (Phase 12.5)
+  // --------------------------------------------------------------------
+
+  /**
+   * Retrieve the workspace LLM config for a user.
+   * @param {string} userId
+   * @returns {{ userId, provider, model, encryptedApiKey, keyLast4, createdAt, updatedAt } | null}
+   */
+  async getWorkspaceLlmConfig(userId) {
+    const row = this.db
+      .prepare(`SELECT * FROM workspace_llm_config WHERE user_id = ?`)
+      .get(userId);
+    return row ? llmConfigRowToConfig(row) : null;
+  }
+
+  /**
+   * Upsert the workspace LLM config for a user.
+   * Uses a transactional check-then-insert-or-update to preserve created_at
+   * on subsequent sets (INSERT OR REPLACE would reset it via DELETE+INSERT).
+   *
+   * @param {string} userId
+   * @param {{ provider?: string, model?: string, encryptedApiKey: string, keyLast4: string }} config
+   */
+  async setWorkspaceLlmConfig(userId, { provider, model, encryptedApiKey, keyLast4 }) {
+    const now = Date.now();
+    const upsert = this.db.transaction(() => {
+      const existing = this.db
+        .prepare(`SELECT user_id FROM workspace_llm_config WHERE user_id = ?`)
+        .get(userId);
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE workspace_llm_config
+               SET provider = ?,
+                   model = ?,
+                   encrypted_api_key = ?,
+                   key_last4 = ?,
+                   updated_at = ?
+             WHERE user_id = ?`
+          )
+          .run(provider || 'anthropic', model || null, encryptedApiKey, keyLast4, now, userId);
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO workspace_llm_config
+               (user_id, provider, model, encrypted_api_key, key_last4, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(userId, provider || 'anthropic', model || null, encryptedApiKey, keyLast4, now, now);
+      }
+    });
+    upsert();
+  }
+
+  /**
+   * Delete the workspace LLM config for a user.
+   * @param {string} userId
+   * @returns {boolean} true if a row was deleted, false if no row existed.
+   */
+  async deleteWorkspaceLlmConfig(userId) {
+    const result = this.db
+      .prepare(`DELETE FROM workspace_llm_config WHERE user_id = ?`)
+      .run(userId);
+    return result.changes > 0;
+  }
+
+  // --------------------------------------------------------------------
+  // Workspace LLM usage telemetry (Phase 12.5)
+  // --------------------------------------------------------------------
+
+  /**
+   * Record one LLM call's usage for a user.
+   *
+   * @param {{ userId, feature, model, inputTokens, outputTokens, estimatedCostUsd }} opts
+   */
+  async recordLlmUsage({ userId, feature, model, inputTokens, outputTokens, estimatedCostUsd }) {
+    const id = require('crypto').randomUUID();
+    const occurredAt = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO workspace_llm_usage
+           (id, user_id, feature, model, input_tokens, output_tokens, estimated_cost_usd, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(id, userId, feature, model, inputTokens || 0, outputTokens || 0, estimatedCostUsd || 0, occurredAt);
+  }
+
+  /**
+   * Aggregate LLM usage for a user over the last N milliseconds.
+   *
+   * @param {string} userId
+   * @param {number} sinceMs - epoch-ms lower bound (e.g. Date.now() - 30*86400*1000)
+   * @returns {{ totalInputTokens, totalOutputTokens, totalCostUsd, byFeature }}
+   */
+  async getLlmUsageRollup(userId, sinceMs) {
+    const rows = this.db
+      .prepare(
+        `SELECT feature,
+                SUM(input_tokens)       AS input_tokens,
+                SUM(output_tokens)      AS output_tokens,
+                SUM(estimated_cost_usd) AS cost_usd
+           FROM workspace_llm_usage
+          WHERE user_id = ? AND occurred_at >= ?
+          GROUP BY feature`
+      )
+      .all(userId, sinceMs);
+
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    const byFeature = {};
+
+    for (const row of rows) {
+      const inp = Number(row.input_tokens) || 0;
+      const out = Number(row.output_tokens) || 0;
+      const cost = Number(row.cost_usd) || 0;
+      totalInputTokens += inp;
+      totalOutputTokens += out;
+      totalCostUsd += cost;
+      byFeature[row.feature] = { tokens: inp + out, cost };
+    }
+
+    return { totalInputTokens, totalOutputTokens, totalCostUsd, byFeature };
+  }
+
+  // --------------------------------------------------------------------
   // Rate-limit hits (Phase 9C)
   // --------------------------------------------------------------------
 
@@ -608,6 +753,11 @@ function rowToJob(row) {
     userId: row.user_id || null,
     // Phase 9C: nullable on legacy rows pre-0004.
     uploadBytes: row.upload_bytes || null,
+    // Phase 12: rebuild job kind + linkage. Default 'audit' for rows
+    // created before 0007 migration (kind column won't be present).
+    kind: row.kind || 'audit',
+    parentJobId: row.parent_job_id || null,
+    mode: row.mode || null,
   };
 }
 
@@ -615,6 +765,18 @@ function parseJson(value) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') return value; // already an object (defensive)
   try { return JSON.parse(value); } catch (_) { return null; }
+}
+
+function llmConfigRowToConfig(row) {
+  return {
+    userId: row.user_id,
+    provider: row.provider,
+    model: row.model || null,
+    encryptedApiKey: row.encrypted_api_key,
+    keyLast4: row.key_last4,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 module.exports = { SqliteStore };

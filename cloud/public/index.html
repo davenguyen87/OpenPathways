@@ -22,6 +22,7 @@
     </div>
     <div class="topbar-meta" id="topbar-meta">
       <span id="topbar-user" class="topbar-user hidden"></span>
+      <a href="/settings" class="btn btn-link topbar-settings hidden" id="topbar-settings">Settings</a>
       <button id="topbar-logout" class="btn btn-link hidden" type="button">Sign out</button>
       <button class="theme-toggle" id="theme-toggle" type="button"
               aria-label="Theme: auto, matches your system. Activate to switch to light.">
@@ -155,10 +156,27 @@
               <option value="xapi">xAPI</option>
             </select>
           </label>
+          <label class="opt-concurrency-label" id="opt-concurrency-label">
+            <span>Parallel uploads</span>
+            <input
+              type="number"
+              id="opt-concurrency"
+              min="1"
+              max="8"
+              value="4"
+              aria-describedby="opt-concurrency-hint"
+            >
+          </label>
         </div>
-        <p class="muted options-hint">
+        <label class="opt-sequential-label">
+          <input type="checkbox" id="opt-sequential">
+          Upload one at a time (sequential fallback)
+        </label>
+        <p class="muted options-hint" id="opt-concurrency-hint">
           Saved in your browser. Dynamic checks always use headless Chromium &mdash;
           Firefox and WebKit don&rsquo;t expose the accessibility tree via CDP.
+          Parallel uploads speed up large batches; sequential mode is useful when
+          debugging upload issues.
         </p>
       </details>
 
@@ -254,6 +272,7 @@
 
       <div class="results-actions">
         <button class="btn btn-secondary" id="preview-fixes">Preview fixes</button>
+        <button class="btn btn-primary" id="rebuild-cta">Rebuild this audit</button>
         <button class="btn btn-secondary" id="download-html">Download HTML report</button>
         <button class="btn btn-secondary" id="download-md">Download Markdown</button>
         <button class="btn btn-secondary" id="download-json">Download JSON</button>
@@ -274,6 +293,57 @@
 
       <div class="filters" id="filters" role="search" aria-label="Filter violations"></div>
       <div class="results" id="results"></div>
+    </section>
+
+    <!-- ============================================================
+         Rebuild detail view — shows rebuild progress / results /
+         checkpoint review depending on status
+         ============================================================ -->
+    <section class="view view-rebuild hidden" data-view="rebuild" aria-labelledby="rebuild-title">
+      <div class="run-header">
+        <div>
+          <h1 id="rebuild-title" class="serif">Rebuild</h1>
+          <p class="muted" id="rebuild-subtitle">Loading&hellip;</p>
+        </div>
+        <div id="rebuild-header-actions"></div>
+      </div>
+
+      <!-- Progress bar (shown while pending/running) -->
+      <div class="progress-bar rebuild-progress hidden" id="rebuild-progress-bar"
+           role="progressbar" aria-labelledby="rebuild-title"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="progress-fill" id="rebuild-progress-fill"></div>
+      </div>
+      <ol class="progress-log hidden" id="rebuild-progress-log" aria-live="polite" aria-relevant="additions"></ol>
+
+      <!-- Done / promoted: download links + diff iframe -->
+      <div class="rebuild-done-panel hidden" id="rebuild-done-panel">
+        <div class="rebuild-downloads" id="rebuild-downloads"></div>
+        <div class="rebuild-diff-wrap" id="rebuild-diff-wrap"></div>
+      </div>
+
+      <!-- Staged: checkpoint review (full-tier) -->
+      <div class="rebuild-checkpoint hidden" id="rebuild-checkpoint">
+        <div class="checkpoint-layout">
+          <div class="checkpoint-preview-col">
+            <h2 class="checkpoint-col-title">Transform preview</h2>
+            <iframe class="checkpoint-preview-iframe" id="checkpoint-preview-iframe"
+                    title="Rebuild transform preview"
+                    sandbox="allow-same-origin"></iframe>
+          </div>
+          <div class="checkpoint-sidebar">
+            <h2 class="checkpoint-col-title">Transforms</h2>
+            <div class="checkpoint-transforms" id="checkpoint-transforms"></div>
+            <div class="checkpoint-promote-wrap">
+              <div class="checkpoint-error hidden" id="checkpoint-error" role="alert"></div>
+              <button class="btn btn-primary" id="checkpoint-promote" disabled
+                      aria-disabled="true">
+                Promote rebuild
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ============================================================
@@ -300,6 +370,70 @@
       </ul>
     </div>
   </footer>
+
+  <!-- Rebuild tier picker modal -->
+  <div class="modal hidden" id="rebuild-modal" role="dialog" aria-modal="true"
+       aria-labelledby="rebuild-modal-title" aria-hidden="true">
+    <div class="modal-backdrop" id="rebuild-modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="rebuild-modal-title">Rebuild this audit</h2>
+        <button class="btn btn-link" id="rebuild-modal-close" type="button"
+                aria-label="Close rebuild picker">&times;</button>
+      </header>
+      <div class="modal-body" id="rebuild-modal-body">
+        <fieldset class="rebuild-tier-fieldset">
+          <legend class="rebuild-tier-legend">Choose rebuild tier</legend>
+          <label class="rebuild-tier-option">
+            <input type="radio" name="rebuild-tier" value="safe" checked>
+            <span class="rebuild-tier-label">
+              <strong>Safe</strong>
+              <span class="muted">Deterministic mechanical fixes — alt attributes, lang, skip links, label associations. No LLM required.</span>
+            </span>
+          </label>
+          <label class="rebuild-tier-option">
+            <input type="radio" name="rebuild-tier" value="assisted">
+            <span class="rebuild-tier-label">
+              <strong>Assisted</strong>
+              <span class="muted">LLM-generated alt text, link text, and form labels for vague items. Requires a workspace API key configured in Settings.</span>
+            </span>
+          </label>
+          <label class="rebuild-tier-option">
+            <input type="radio" name="rebuild-tier" value="full">
+            <span class="rebuild-tier-label">
+              <strong>Full</strong>
+              <span class="muted">Structural transforms — landmark insertion, widget replacement, page splitting. Requires a checkpoint review before promotion.</span>
+            </span>
+          </label>
+        </fieldset>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn btn-link" id="rebuild-modal-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="rebuild-modal-confirm" type="button">Start rebuild</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Undo picker modal -->
+  <div class="modal hidden" id="undo-modal" role="dialog" aria-modal="true"
+       aria-labelledby="undo-modal-title" aria-hidden="true">
+    <div class="modal-backdrop" id="undo-modal-backdrop"></div>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="undo-modal-title">Undo</h2>
+        <button class="btn btn-link" id="undo-modal-close" type="button"
+                aria-label="Close undo picker">&times;</button>
+      </header>
+      <div class="modal-body" id="undo-modal-body">
+        <p class="muted">Loading&hellip;</p>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn btn-link" id="undo-modal-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="undo-modal-confirm" type="button" disabled
+                aria-disabled="true">Undo selected</button>
+      </footer>
+    </div>
+  </div>
 
   <!-- Full-page overlay shown while a file is being dragged into the window -->
   <div class="drag-overlay" id="drag-overlay" aria-hidden="true">

@@ -3,9 +3,9 @@
  *
  * One module reads PRISM_MODE and validates that hosted mode has
  * the env vars it needs to start safely. Subsequent phases extend this
- * (auth + allowlist in 9B; pg-boss + quotas in 9C); for now the only
- * hosted-mode requirements are SESSION_SECRET and a recognized
- * STORAGE_DRIVER value.
+ * (auth + allowlist in 9B; pg-boss + quotas in 9C; encryption key in
+ * 12.5); for now the only hosted-mode requirements are SESSION_SECRET,
+ * a recognized STORAGE_DRIVER value, and DATA_ENCRYPTION_KEY.
  *
  * Behavior:
  *   - mode === 'local'  (default): single-user, no auth, no public exposure.
@@ -16,6 +16,8 @@
  * with a single readable message; the caller (server/index.js) prints it
  * and exits non-zero rather than booting in a half-configured state.
  */
+
+const { deriveKey } = require('./crypto');
 
 const VALID_STORAGE_DRIVERS = new Set(['local-fs', 's3']);
 const VALID_MODES = new Set(['local', 'hosted']);
@@ -65,6 +67,25 @@ function validate() {
         'PRISM_MODE=hosted requires SESSION_SECRET (>=32 chars)'
       );
     }
+
+    // Phase 12.5: DATA_ENCRYPTION_KEY is required in hosted mode.
+    // Delegate length/format checking to deriveKey — same rules apply
+    // whether the key came from validate() at boot or from a direct
+    // encrypt() call in the route layer.
+    const dek = process.env.DATA_ENCRYPTION_KEY || '';
+    if (!dek) {
+      errors.push(
+        'PRISM_MODE=hosted requires DATA_ENCRYPTION_KEY ' +
+        '(generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))")'
+      );
+    } else {
+      try {
+        deriveKey(dek);
+      } catch (err) {
+        errors.push(`DATA_ENCRYPTION_KEY is invalid: ${err.message}`);
+      }
+    }
+
     if (storageDriver === 's3') {
       // Only validate s3 env when actually using s3. local-fs mode is
       // legitimate for hosted deployments without object storage.

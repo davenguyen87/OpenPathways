@@ -223,24 +223,17 @@ async function rebuildAction(packagePath, cmdOpts, deps) {
   const standard = cmdOpts.standard || 'wcag22';
 
   // Tier dispatch:
-  //   safe     — handled below (v4 path).
-  //   assisted — still a deferred-feature stub at the CLI level until v4.1
-  //              wires its assisted-tier action. Behaviour unchanged here.
+  //   safe     — handled below.
+  //   assisted — handled below (same path as safe; the orchestrator loads
+  //              both safe and assisted fixers when mode === 'assisted'). If
+  //              --llm-provider isn't set, every assisted-claimable
+  //              violation defers cleanly with a clear reason.
   //   full     — v5. Two sub-paths:
   //              1. checkpoint mode (default): rebuild() stages output under
   //                 .rebuild-staging/, the CLI renders preview, prints the
   //                 approval instruction, and exits 0.
   //              2. --no-checkpoint: rebuild() writes inline to packageDir;
   //                 verification runs and the v4 exit-code contract applies.
-  if (mode === 'assisted') {
-    console.log(
-      kleur.yellow(
-        `[rebuild] mode=${mode} is a deferred feature (v4.1/v5). ` +
-        `No rebuild was performed. Exit 0.`
-      )
-    );
-    return doExit(0);
-  }
   if (mode === 'full') {
     return await runFullTierRebuild(packagePath, cmdOpts, d, doExit);
   }
@@ -326,6 +319,21 @@ async function rebuildAction(packagePath, cmdOpts, deps) {
       packageName: path.basename(packagePath),
       outputDir: packageDir,
       brandConfigPath: cmdOpts.brandConfig,
+      // v4.1: forward LLM gating + model so the orchestrator can build a
+      // per-rebuild provider for assisted-tier fixers. Safe-mode rebuilds
+      // ignore these.
+      llmProvider: cmdOpts.llmProvider,
+      llmKeyFromEnv: cmdOpts.llmKeyFromEnv,
+      llmModel: cmdOpts.llmModel,
+      // v5.1: forward judgment knobs for full-tier widget transformers.
+      // commander emits cmdOpts.llmJudgment for `--no-llm-judgment`.
+      llmJudgment: cmdOpts.llmJudgment,
+      llmJudgmentTokenBudget: cmdOpts.llmJudgmentTokenBudget
+        ? parseInt(cmdOpts.llmJudgmentTokenBudget, 10)
+        : undefined,
+      llmJudgmentConfidenceThreshold: cmdOpts.llmJudgmentConfidenceThreshold
+        ? parseFloat(cmdOpts.llmJudgmentConfidenceThreshold)
+        : undefined,
     });
     spinner.succeed(`Rebuild complete (${manifest.patches.length} patches)`);
 
@@ -547,7 +555,20 @@ async function runFullTierRebuild(packagePath, cmdOpts, d, doExit) {
       packageName: path.basename(packagePath),
       outputDir: packageDir,
       noCheckpoint,
-      brandConfigPath: cmdOpts.brandConfig
+      brandConfigPath: cmdOpts.brandConfig,
+      // v4.1: full mode also picks up assisted fixers when LLM credentials
+      // are supplied; absent credentials, the assisted path defers cleanly.
+      llmProvider: cmdOpts.llmProvider,
+      llmKeyFromEnv: cmdOpts.llmKeyFromEnv,
+      llmModel: cmdOpts.llmModel,
+      // v5.1: forward judgment knobs for full-tier widget transformers.
+      llmJudgment: cmdOpts.llmJudgment,
+      llmJudgmentTokenBudget: cmdOpts.llmJudgmentTokenBudget
+        ? parseInt(cmdOpts.llmJudgmentTokenBudget, 10)
+        : undefined,
+      llmJudgmentConfidenceThreshold: cmdOpts.llmJudgmentConfidenceThreshold
+        ? parseFloat(cmdOpts.llmJudgmentConfidenceThreshold)
+        : undefined,
     });
     spinner.succeed(`Full-tier rebuild complete (${(rebuildResult.manifest.patches || []).length} patches)`);
 
@@ -680,7 +701,7 @@ function registerRebuild(program, deps) {
       'Produces rebuilt.zip, rebuild-manifest.json, rebuild-diff.html, and rebuild-summary.html.'
     )
     .requiredOption('--engagement <id>', 'Engagement ID (required)')
-    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted is deferred to v4.1)', 'safe')
+    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe). assisted needs --llm-provider; without it, assisted-claimable violations defer.', 'safe')
     .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag22 — rebuild target; differs from audit default)', 'wcag22')
     .option('--no-checkpoint', 'Skip the checkpoint gate and write directly to rebuilt.zip. Default off; the checkpoint gate is on by default for full mode.')
     .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
@@ -688,6 +709,12 @@ function registerRebuild(program, deps) {
     .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
     .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
     .option('--engagements-root <path>', 'Root directory for engagements (default: ./engagements)', './engagements')
+    .option('--llm-provider <provider>', 'LLM provider for assisted-tier fixers (off by default; requires --llm-key-from-env)')
+    .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
+    .option('--llm-model <model-id>', 'Override the provider default model (alias form, e.g. claude-sonnet-4-6)')
+    .option('--no-llm-judgment', 'Disable v5.1 LLM widget classification on full-tier transforms even when --llm-provider is set')
+    .option('--llm-judgment-token-budget <n>', 'Per-package token budget for transformer judgment (default: 20000)', null)
+    .option('--llm-judgment-confidence-threshold <n>', 'Confidence floor for verdict=match to count as confirmed (default: 0.7)', null)
     .action(async (packagePath, cmdOpts) => {
       await rebuildAction(packagePath, cmdOpts, deps);
     });
@@ -732,6 +759,11 @@ async function rebuildLibraryAction(directory, cmdOpts, deps) {
       timeoutDynamic: cmdOpts.timeoutDynamic ? parseInt(cmdOpts.timeoutDynamic, 10) : 30000,
       brandConfig: await loadBrandConfig(cmdOpts.brandConfig),
       brandConfigPath: cmdOpts.brandConfig,
+      // v4.1: forward LLM gating + model so per-package rebuilds can fire
+      // assisted-tier fixers when credentials are supplied.
+      llmProvider: cmdOpts.llmProvider,
+      llmKeyFromEnv: cmdOpts.llmKeyFromEnv,
+      llmModel: cmdOpts.llmModel,
       audit: d.audit,
       verify: d.verify,
       writeReports: d.writeReports,
@@ -789,7 +821,7 @@ function registerRebuildLibrary(program, deps) {
       'Produces per-package artifacts and a _rebuild-rollup.{html,md} at the engagement level.'
     )
     .requiredOption('--engagement <id>', 'Engagement ID (required)')
-    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe; assisted is deferred to v4.1)', 'safe')
+    .option('--mode <mode>', 'Rebuild mode: safe|assisted|full (default: safe). assisted needs --llm-provider; without it, assisted-claimable violations defer.', 'safe')
     .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag22 — rebuild target; differs from audit default)', 'wcag22')
     .option('--no-checkpoint', 'Skip the checkpoint gate and write directly to rebuilt.zip. Default off; the checkpoint gate is on by default for full mode.')
     .option('--brand-config <path>', 'Path to custom brand config (default: config/brand.json)')
@@ -797,6 +829,12 @@ function registerRebuildLibrary(program, deps) {
     .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
     .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
     .option('--engagements-root <path>', 'Root directory for engagements (default: ./engagements)', './engagements')
+    .option('--llm-provider <provider>', 'LLM provider for assisted-tier fixers (off by default; requires --llm-key-from-env)')
+    .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
+    .option('--llm-model <model-id>', 'Override the provider default model (alias form, e.g. claude-sonnet-4-6)')
+    .option('--no-llm-judgment', 'Disable v5.1 LLM widget classification on full-tier transforms even when --llm-provider is set')
+    .option('--llm-judgment-token-budget <n>', 'Per-package token budget for transformer judgment (default: 20000)', null)
+    .option('--llm-judgment-confidence-threshold <n>', 'Confidence floor for verdict=match to count as confirmed (default: 0.7)', null)
     .action(async (directory, cmdOpts) => {
       await rebuildLibraryAction(directory, cmdOpts, deps);
     });

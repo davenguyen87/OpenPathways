@@ -15,7 +15,7 @@
  * @returns {string} HTML content
  */
 function renderLibraryRollupHtml(library, options = {}) {
-  const { engagementId = 'Library' } = options;
+  const { engagementId = 'Library', librarySynthesis = null } = options;
 
   // Brand variables (from V3_CONTRACT_NOTES.md §7)
   const colors = {
@@ -306,6 +306,41 @@ function renderLibraryRollupHtml(library, options = {}) {
       page-break-inside: avoid;
     }
 
+    .ai-pill {
+      display: inline-block;
+      margin: 6px 0 12px;
+      padding: 4px 10px;
+      background: var(--paper-2);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+
+    .synthesis-block {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 20px 24px;
+      margin: 1.5em 0 2em;
+      page-break-inside: avoid;
+    }
+
+    .synthesis-block h2 {
+      margin-top: 0;
+      font-size: 20px;
+    }
+
+    .synthesis-text {
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--ink);
+      white-space: pre-wrap;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -352,6 +387,9 @@ function renderLibraryRollupHtml(library, options = {}) {
         <p>Assessment Date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </div>
     </div>
+
+    <!-- Library Synthesis (narrative) -->
+    ${renderLibrarySynthesisHtml(librarySynthesis)}
 
     <!-- Executive Summary -->
     <h1>Executive Summary</h1>
@@ -443,7 +481,7 @@ function renderLibraryRollupHtml(library, options = {}) {
  * @returns {string} Markdown content
  */
 function renderLibraryRollupMarkdown(library, options = {}) {
-  const { engagementId = 'Library' } = options;
+  const { engagementId = 'Library', librarySynthesis = null } = options;
 
   const { packageCount, cleanCount, triageDistribution, totalEffortHours, topRisks, recommendedEngagementShape } = library;
 
@@ -454,7 +492,7 @@ function renderLibraryRollupMarkdown(library, options = {}) {
 **Engagement:** ${engagementId}
 **Assessment Date:** ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
 
-## Executive Summary
+${renderLibrarySynthesisMarkdown(librarySynthesis)}## Executive Summary
 
 This report summarizes the accessibility assessment of a library of **${packageCount}** SCORM/AICC training packages audited for WCAG 2.1 AA compliance.
 
@@ -546,6 +584,53 @@ This audit does not assess learner performance metrics, SCORM sequencing logic, 
 `;
 
   return markdown;
+}
+
+/**
+ * Escape HTML special characters.
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Render the library synthesis block as HTML.
+ * Returns empty string when absent.
+ */
+function renderLibrarySynthesisHtml(librarySynthesis) {
+  if (!librarySynthesis || !librarySynthesis.synthesis) return '';
+  const { text, provenance } = librarySynthesis.synthesis;
+  if (!text) return '';
+  const model = escapeHtml((provenance && provenance.model) || '');
+  const ts = escapeHtml(((provenance && provenance.generatedAt) || '').replace(/\.\d{3}Z$/, 'Z'));
+  const pill = `<div class="ai-pill" role="note">AI-DRAFTED · ${model} · ${ts} · review before sharing</div>`;
+  return `<div class="synthesis-block">
+      <h2>Library Synthesis</h2>
+      ${pill}
+      <div class="synthesis-text">${escapeHtml(text)}</div>
+    </div>`;
+}
+
+/**
+ * Render the library synthesis block as Markdown.
+ * Returns empty string when absent.
+ */
+function renderLibrarySynthesisMarkdown(librarySynthesis) {
+  if (!librarySynthesis || !librarySynthesis.synthesis) return '';
+  const { text, provenance } = librarySynthesis.synthesis;
+  if (!text) return '';
+  const model = (provenance && provenance.model) || '';
+  const ts = ((provenance && provenance.generatedAt) || '').replace(/\.\d{3}Z$/, 'Z');
+  let md = `## Library Synthesis\n\n`;
+  md += `_AI-drafted · ${model} · ${ts} · review before sharing_\n\n`;
+  md += `${text}\n\n`;
+  return md;
 }
 
 /**

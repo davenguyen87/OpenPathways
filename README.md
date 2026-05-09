@@ -12,8 +12,8 @@ Prism ships one product with two pipelines:
 
 This README covers the **CLI** (the primary surface). Two adjacent surfaces share the same audit core under `src/`:
 
-- **Local web UI** (`web/`) — drop a `.zip` in a browser. `npm run serve`. See [`web/README.md`](web/README.md).
-- **Hosted multi-tenant service** (`cloud/`) — magic-link auth, S3 storage, Coolify deploy. See [`cloud/README.md`](cloud/README.md) and [`cloud/DEPLOY.md`](cloud/DEPLOY.md).
+- **Local web UI** (`web/`) — drop a `.zip` in a browser. `npm run serve`. Audit-only. See [`web/README.md`](web/README.md).
+- **Hosted multi-tenant service** (`cloud/`) — magic-link auth, S3 storage, Coolify deploy. Exposes audit, rebuild (safe / assisted / full), full-tier checkpoint review, undo, and per-workspace LLM key management at `/settings`. See [`cloud/README.md`](cloud/README.md) and [`cloud/DEPLOY.md`](cloud/DEPLOY.md).
 
 ---
 
@@ -161,6 +161,57 @@ Re-runs `verify()` after undo and updates the manifest with a `revertHistory` en
 
 ---
 
+## LLM features
+
+Three opt-in LLM features complete the audit + rebuild story. All three are off unless `--llm-provider` is set; all three activate automatically once it is, with per-feature opt-outs for cost control.
+
+**(a) Audit narrative** (v3.1) — the HTML and Markdown reports gain a "Section 01a — Engagement Narrative" between the cover and Section 01. Three prose blocks: executive narrative, per-criterion remediation guides for the top failing criteria, and a prioritized scope memo. Library mode adds a cross-package synthesis block at the top of the rollup. Each block carries a provenance pill ("AI-DRAFTED — review before sharing") and is independent — if one block fails, the others still render. Opt out per run with `--no-llm-narrative`.
+
+**(b) Assisted-tier fixers** (v4.1) — `--mode assisted` (or `--mode full`) generates candidate content for single-file judgment items: alt text for content images (1.1.1), link text rewrites for vague anchors (2.4.4), and form labels for unlabeled controls (3.3.2). Without `--llm-provider`, these violations defer cleanly with reason `--llm-provider not set`. No flag needed to opt out — removing `--llm-provider` is the off switch.
+
+**(c) Transformer judgment** (v5.1) — `--mode full` runs an LLM classification pass alongside the heuristic widget detectors (tabs, accordion, carousel, dialog). The LLM confirms, rejects, or marks uncertain each heuristic candidate before the transform is staged. `no-match` verdicts are silently dropped (the deferred list records the reason); `uncertain` verdicts stage with an amber "AI-UNCERTAIN" pill for human scrutiny at the checkpoint. Opt out with `--no-llm-judgment`.
+
+### Activation
+
+Set `--llm-provider anthropic --llm-key-from-env ANTHROPIC_API_KEY` on `audit`, `audit-library`, `rebuild`, or `rebuild-library`. All three features activate automatically when the provider is configured:
+
+```bash
+# Audit with narrative
+prism audit <pkg.zip> --engagement <id> --llm-provider anthropic --llm-key-from-env ANTHROPIC_API_KEY
+
+# Assisted rebuild (judgment fixers)
+prism rebuild <pkg.zip> --engagement <id> --mode assisted --llm-provider anthropic --llm-key-from-env ANTHROPIC_API_KEY
+
+# Full rebuild (judgment fixers + transformer classification)
+prism rebuild <pkg.zip> --engagement <id> --mode full --llm-provider anthropic --llm-key-from-env ANTHROPIC_API_KEY
+```
+
+Default model is `claude-haiku-4-5` (alias). Override with `--llm-model <id>` (e.g. `claude-sonnet-4-6`).
+
+### Cost
+
+Measured at default Haiku pricing: ~$0.05/package for narrative, ~$0.025/package additional for full-tier transformer judgment. A 200-package library costs roughly $11–16 total. Per-feature token budgets (`--llm-narrative-token-budget`, `--llm-judgment-token-budget`) are configurable and enforced per package.
+
+### Provenance and review
+
+Every LLM-generated artifact records provider, model, prompt hash, token usage, latency, and a `generatedAt` timestamp. Reports render an `AI-DRAFTED` (narrative) or `AI-CONFIRMED` / `AI-UNCERTAIN` (judgment) pill labeled "review before sharing." Consultant sign-off remains the contract: narrative blocks and assisted patches are first drafts, not final deliverables.
+
+### Deferred fallback
+
+Without `--llm-provider`, every assisted-tier violation defers with reason `--llm-provider not set`; reports render byte-identically to the pre-v3.1 path. No placeholder sections, no empty pills, no partial artifacts.
+
+### Runtime dependency
+
+`@anthropic-ai/sdk` (`^0.95.1`) is a runtime dependency, installed via `npm install`. It is loaded only when `--llm-provider anthropic` is active.
+
+### Specs
+
+- [PRD v3.1 — Audit Narrative](archive/workstreams/v3.1-narrative/PRD_v3.1_Narrative.md)
+- [PRD v4.1 — Assisted Tier](archive/workstreams/v4.1-assisted/PRD_v4.1_AssistedTier.md)
+- [PRD v5.1 — Transformer Judgment](archive/workstreams/v5.1-judgment/PRD_v5.1_TransformerJudgment.md)
+
+---
+
 ## Key flags
 
 | Flag | Meaning | Default | Notes |
@@ -175,8 +226,15 @@ Re-runs `verify()` after undo and updates the manifest with a `revertHistory` en
 | `--transform <id>` | Specific transform id (repeatable) | — | `rebuild-checkpoint approve` (which transforms to approve), `rebuild-undo` (which transforms to revert). |
 | `--all` | Approve every pending transform | — | `rebuild-checkpoint approve` only. |
 | `--force` | Skip the confirmation prompt | — | `rebuild-checkpoint reject` only. |
-| `--llm-provider <provider>` | LLM provider for assisted findings | — | Off by default. Both `--llm-provider` and `--llm-key-from-env` required to enable. |
-| `--llm-key-from-env <env-var>` | Environment variable holding LLM API key | — | Off by default. No assisted findings without both flags set. |
+| `--llm-provider <provider>` | LLM provider for all LLM features | — | Off by default. Both `--llm-provider` and `--llm-key-from-env` required to enable. Activates narrative (audit), assisted fixers (rebuild), and transformer judgment (full rebuild). |
+| `--llm-key-from-env <env-var>` | Environment variable holding LLM API key | — | Off by default. No LLM features without both flags set. |
+| `--llm-model <model-id>` | Override the provider default model | `claude-haiku-4-5` | Alias form, e.g. `claude-sonnet-4-6`. Applies to all LLM features. |
+| `--no-llm-narrative` | Disable narrative generation | — | `audit` / `audit-library` only. Useful for CI speed when `--llm-provider` is set. |
+| `--llm-narrative-token-budget <n>` | Per-package narrative token budget | `30000` | `audit` / `audit-library` only. |
+| `--llm-narrative-criterion-cap <n>` | Max per-criterion guides to generate | `12` | `audit` / `audit-library` only. |
+| `--no-llm-judgment` | Disable transformer judgment | — | `rebuild --mode full` only. Reverts to heuristic-only widget classification. |
+| `--llm-judgment-token-budget <n>` | Per-package token budget for transformer judgment | `20000` | `rebuild --mode full` only. |
+| `--llm-judgment-confidence-threshold <n>` | Confidence floor for `match` verdict | `0.7` | `rebuild --mode full` only. Below threshold, verdict is treated as `uncertain`. |
 | `--browser <browser>` | Browser for dynamic checks | `chromium` | `chromium`, `firefox`, or `webkit`. |
 | `--fix` | Apply mechanical fixes; write corrected package | — | Writes `<package>.scorm-fixed.zip`. Single-package `audit` only. Legacy v2 flag — prefer `rebuild --mode safe` for engagement work. |
 | `--fix-dry-run` | Preview fixes without writing | — | Single-package `audit` only. |
@@ -326,12 +384,28 @@ Audit a library and use 2.2 standards:
 node src/cli.js audit-library ./legacy-library/ --engagement SL-2026-0418 --standard wcag22
 ```
 
-Audit with LLM-assisted findings enabled:
+Audit with narrative enabled (v3.1):
 
 ```bash
 node src/cli.js audit course.zip --engagement SL-2026-0418 \
-  --llm-provider openai \
-  --llm-key-from-env OPENAI_API_KEY
+  --llm-provider anthropic \
+  --llm-key-from-env ANTHROPIC_API_KEY
+```
+
+Assisted rebuild with LLM-generated alt text, link text, and form labels (v4.1):
+
+```bash
+node src/cli.js rebuild course.zip --engagement SL-2026-0418 --mode assisted \
+  --llm-provider anthropic \
+  --llm-key-from-env ANTHROPIC_API_KEY
+```
+
+Full rebuild with transformer judgment enabled (v5.1):
+
+```bash
+node src/cli.js rebuild course.zip --engagement SL-2026-0418 --mode full \
+  --llm-provider anthropic \
+  --llm-key-from-env ANTHROPIC_API_KEY
 ```
 
 Redact client name in the draft (for internal review before delivery):

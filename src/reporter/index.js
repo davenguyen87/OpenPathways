@@ -43,6 +43,10 @@ async function writeReports(config) {
     brandConfigPath = null,
     llmProvider = null,
     llmKeyFromEnv = null,
+    llmModel = null,
+    llmNarrative = true,                    // v3.1: narrative is on by default when LLM is configured
+    llmNarrativeTokenBudget = 30000,        // v3.1: per-package narrative budget
+    llmNarrativeCriterionCap = 12,          // v3.1: max per-criterion guides
     clientName = null,
   } = options;
 
@@ -149,6 +153,38 @@ async function writeReports(config) {
     };
   }
 
+  // ===== V3.1: GENERATE LLM NARRATIVE (opt-in, before serialization) =====
+  // Narrative reads the fully-enriched scorecard and produces an `auditNarrative`
+  // object the renderers will surface as "Section 01a — Engagement Narrative".
+  // Gated on engagement mode + LLM provider + the --no-llm-narrative opt-out.
+  // Failures (missing provider, validator rejection, token budget) leave the
+  // section null; renderers fall back to the existing programmatic templates.
+  if (engagementId && llmNarrative !== false) {
+    const { buildProviderFromOptions } = require('../lib/llm-provenance');
+    const { generateNarrative } = require('../lib/audit-narrative');
+    const provider = buildProviderFromOptions({ llmProvider, llmKeyFromEnv, llmModel });
+    if (provider) {
+      try {
+        const narrative = await generateNarrative({
+          auditResults: scorecard,
+          options: {
+            engagementId,
+            clientName,
+            redactClientName: engagementRedact,
+            llmNarrativeTokenBudget,
+            llmNarrativeCriterionCap
+          },
+          provider
+        });
+        if (narrative) {
+          scorecard.auditNarrative = narrative;
+        }
+      } catch (_err) {
+        // Narrative is best-effort — the scorecard itself is the deliverable.
+      }
+    }
+  }
+
   // Serialize to JSON
   const jsonString = serializeScorecard(scorecard);
 
@@ -205,6 +241,7 @@ async function writeReports(config) {
       brand: brandConfig || undefined,
       engagementId,
       redactClientName: engagementRedact,
+      narrative: scorecard.auditNarrative,    // v3.1
     });
     const htmlPath = path.join(outputDir, 'report.html');
     await fs.writeFile(htmlPath, htmlReport, 'utf8');
@@ -213,6 +250,7 @@ async function writeReports(config) {
     // Render v3 Markdown
     const mdReport = renderMarkdownV3(scorecard, {
       engagementRedact,
+      narrative: scorecard.auditNarrative,    // v3.1
     });
     const mdPath = path.join(outputDir, 'report.md');
     await fs.writeFile(mdPath, mdReport, 'utf8');

@@ -40,6 +40,18 @@
  * @property {string[]} files - package-relative paths the transform writes to
  * @property {boolean} manifestEdited - true when the transform edits imsmanifest.xml
  *
+ * @typedef {Object} TransformJudgment
+ * @property {'llm'} source                                  Always 'llm' in v5.1.
+ * @property {'match'|'no-match'|'uncertain'} verdict
+ * @property {number} confidence                              0..1
+ * @property {string} rationale                               LLM's reason; ≤ 280 chars.
+ * @property {string} provider                                e.g. 'anthropic'
+ * @property {string} model                                   e.g. 'claude-haiku-4-5'
+ * @property {string} promptHash                              `sha256:<hex>`
+ * @property {{inputTokens:number, outputTokens:number}} usage
+ * @property {number} latencyMs
+ * @property {string} generatedAt                             ISO 8601
+ *
  * @typedef {Object} Transform
  * @property {string} id - transform-NNNN, assigned by manifest.addTransform
  * @property {string} transformer - id of the transformer module that emitted this
@@ -55,6 +67,7 @@
  * @property {'pending-checkpoint'|'applied'|'reverted'|'rejected'} status
  * @property {string} [checkpointApprovedBy]
  * @property {string} [checkpointApprovedAt]
+ * @property {TransformJudgment} [judgment]  v5.1 — populated when LLM classified the candidate.
  *
  * The Transformer interface is a duck-typed contract — there is no runtime
  * base class. v5 transformers expose:
@@ -186,6 +199,10 @@ function captureContext(content, startOffset, endOffset, contextChars = PATCH_CO
  * @param {'safe'|'assisted'|'full'} [opts.tier='safe']
  * @param {'definitive'|'likely'|'needs-review'} opts.confidence
  * @param {'deterministic'|'llm'|'rule-based'} [opts.provenanceSource='deterministic']
+ * @param {Object} [opts.provenanceExtras] - Extra fields merged into `provenance`
+ *   alongside `source` and `timestamp`. Used by assisted-tier fixers to carry
+ *   `provider`, `model`, `promptHash`, `usage`, `latencyMs`. Caller-controlled
+ *   shape; manifest validation only requires `source` + `timestamp`.
  * @param {string} opts.file
  * @param {string} opts.content - pre-edit content
  * @param {number} opts.originalOffset
@@ -203,6 +220,7 @@ function buildPatch(opts) {
     tier = 'safe',
     confidence,
     provenanceSource = 'deterministic',
+    provenanceExtras,
     file,
     content,
     originalOffset,
@@ -226,7 +244,8 @@ function buildPatch(opts) {
     confidence,
     provenance: {
       source: provenanceSource,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      ...(provenanceExtras && typeof provenanceExtras === 'object' ? provenanceExtras : {})
     },
     file,
     range: {

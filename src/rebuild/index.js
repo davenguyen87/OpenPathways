@@ -36,6 +36,7 @@ const cheerio = require('cheerio');
 const { createManifest, addPatch, addTransform, addDeferred } = require('./manifest');
 const { unpack, pack, sha256 } = require('./packager');
 const { loadTransformers } = require('../lib/transformer-registry');
+const { buildProviderFromOptions } = require('../lib/llm-provenance');
 
 const DEFAULT_LOGGER = {
   info: (msg) => process.stdout.write(`${msg}\n`),
@@ -43,15 +44,24 @@ const DEFAULT_LOGGER = {
 };
 
 /**
- * Load every safe-tier fixer in `fixersDir`. Filters defensively: a file
- * without `tier === 'safe'` or without both `canFix` and `apply` is
- * skipped. Fixers are sorted by `id` ascending so claim-order is
+ * Load fixers in `fixersDir` whose `tier` is in the allowed set. Filters
+ * defensively: a file without an allowed `tier` or without both `canFix` and
+ * `apply` is skipped. Fixers are sorted by `id` ascending so claim-order is
  * deterministic across machines (filesystem readdir order is not).
  *
+ * Within a single tier, every fixer competes equally for each violation; the
+ * first match wins (this matches the existing safe-tier behavior). Assisted
+ * fixers are typically narrower in their `canFix` claim than safe fixers, so
+ * mixing tiers in one pool is intentional — the safe-tier `add-alt-decorative`
+ * claims decorative images first; the assisted `generate-alt-text` only
+ * claims what's left.
+ *
  * @param {string} fixersDir
+ * @param {Array<'safe'|'assisted'|'full'>} [tiers=['safe']]
  * @returns {Array}
  */
-function loadFixers(fixersDir) {
+function loadFixers(fixersDir, tiers) {
+  const allowed = new Set(Array.isArray(tiers) && tiers.length > 0 ? tiers : ['safe']);
   const entries = fs.readdirSync(fixersDir);
   const fixers = [];
   for (const entry of entries) {
@@ -66,7 +76,7 @@ function loadFixers(fixersDir) {
     } catch (_) {
       continue;
     }
-    if (!mod || mod.tier !== 'safe') continue;
+    if (!mod || !allowed.has(mod.tier)) continue;
     if (typeof mod.canFix !== 'function' || typeof mod.apply !== 'function') continue;
     fixers.push(mod);
   }
@@ -325,7 +335,13 @@ async function runTransformerPass({
   stageOutputs,
   transformersDir,
   logger,
-  now
+  now,
+  // v5.1: per-rebuild LLM provider for transformer judgment, plus the
+  // engagement-level options bag that carries judgment thresholds and the
+  // --no-llm-judgment opt-out. Both are optional — when absent the
+  // transformers behave exactly as in v5.
+  provider,
+  options
 }) {
   const transformers = loadTransformers(transformersDir).filter((t) => t.tier === 'full');
   if (transformers.length === 0) return;
@@ -362,7 +378,15 @@ async function runTransformerPass({
     auditFindings: findingsList,
     findings: findingsList,
     audit: { findings: findingsList, violations: findingsList },
-    opts: {},
+    // v5.1: provider is null unless full mode + --llm-provider set + not
+    // --no-llm-judgment. Widget transformers see this and call classifyWidget
+    // when truthy; otherwise they fall back to heuristic-only behavior. opts
+    // carries the judgment knobs (confidence threshold, token budget).
+    provider: (options && options.llmJudgment === false) ? null : (provider || null),
+    opts: {
+      llmJudgmentConfidenceThreshold: options && options.llmJudgmentConfidenceThreshold,
+      llmJudgmentTokenBudget: options && options.llmJudgmentTokenBudget
+    },
     log: (msg) => transformerLogs.push(String(msg))
   };
 
@@ -387,6 +411,27 @@ async function runTransformerPass({
         line: 0
       });
       continue;
+    }
+
+    // v5.1: surface any deferred entries the transformer emitted (e.g. LLM
+    // judgment rejected a candidate). These must propagate even when the
+    // transformer ends up emitting zero patches — that's exactly the case
+    // where the consultant most needs to see what the LLM dropped.
+    if (result && Array.isArray(result.deferred)) {
+      for (const d of result.deferred) {
+        try {
+          addDeferred(manifest, {
+            criterion: d.criterion || (transformer.criteria && transformer.criteria[0]) || '',
+            triage: d.triage || transformer.triage || 'author rework',
+            reason: d.reason || `${transformer.id} declined`,
+            file: d.file || '',
+            line: typeof d.line === 'number' ? d.line : 0
+          });
+        } catch (_) {
+          // Malformed deferred entry from a transformer is a transformer
+          // bug — skip silently so it doesn't block the rebuild.
+        }
+      }
     }
 
     if (!result || !Array.isArray(result.patches) || result.patches.length === 0) {
@@ -721,6 +766,12 @@ async function runTransformerPass({
     if (transformShape.checkpointApprovedAt !== undefined) {
       transformRecord.checkpointApprovedAt = transformShape.checkpointApprovedAt;
     }
+    // v5.1: forward the optional LLM judgment field if the transformer set
+    // one. Without this copy the field is silently dropped here even though
+    // the transformer correctly populated it.
+    if (transformShape.judgment !== undefined) {
+      transformRecord.judgment = transformShape.judgment;
+    }
 
     try {
       addTransform(manifest, transformRecord);
@@ -805,46 +856,24 @@ async function rebuild(packagePath, auditResults, opts) {
   // self-describing.
   const inputZipSha256 = await sha256(packagePath);
 
-  // Tier dispatch: assisted is a stub until v4.1 lands. We still build a
-  // manifest so callers can introspect what *would* be deferred. No zip is
-  // written. v5 wires `mode === 'full'` further down — it falls through
-  // this stub and runs the safe fixer pass + the transformer pass.
-  if (mode === 'assisted') {
-    const manifest = createManifest({
-      engagementId,
-      packageName,
-      inputZipSha256,
-      mode,
-      standard,
-      createdAt: now().toISOString()
-    });
-    // Manifest serializer requires a non-empty outputZipSha256. Since no
-    // zip was written, set it equal to the input hash; the empty `patches`
-    // array + populated `deferred` makes the no-op semantically clear.
-    manifest.outputZipSha256 = inputZipSha256;
-
-    for (const v of violations) {
-      addDeferred(manifest, {
-        criterion: v.criterion || '',
-        triage: v.triage || 'auto-fix safe',
-        reason: `tier=${mode} not implemented in v4 — deferred to v4.1/v5`,
-        file: v.file || '',
-        line: typeof v.line === 'number' ? v.line : 0
-      });
-    }
-    logger.info(
-      `[rebuild] mode=${mode} is deferred to v4.1/v5; ${manifest.deferred.length} finding(s) marked deferred, no .zip written`
-    );
-    return { manifest, rebuiltZipPath: null };
-  }
-
-  // Real path. Safe and (in v5) full both flow through here. Full mode
-  // additionally runs the transformer pass after fixers and either stages
-  // the output (the default) or writes inline (`opts.noCheckpoint`).
-  //
-  // Order: fixers run per-file (the v4 pass) and THEN transformers run
-  // per-package (the v5 pass). Don't interleave.
+  // Tier dispatch: safe runs only safe-tier fixers; assisted runs safe +
+  // assisted fixers (assisted ones only fire when LLM credentials are
+  // supplied — without them their canFix() returns false and the violation
+  // defers); full runs safe + assisted fixers and then the transformer pass.
+  // The early-exit assisted stub from v4 was removed when v4.1 wired the
+  // assisted-tier fixers below.
   const isFull = mode === 'full';
+  const isAssistedOrFull = mode === 'assisted' || isFull;
+  const fixerTiers = isAssistedOrFull ? ['safe', 'assisted'] : ['safe'];
+
+  // One LLM provider per rebuild() call — engagement isolation. Returns
+  // null when --llm-provider isn't set; assisted fixers see that and defer.
+  // Tests (and callers that want to share a client) may inject a pre-built
+  // provider via `opts.llmProviderInstance`; when supplied it wins over the
+  // CLI-flag-driven path so the env-var dance is unnecessary.
+  const llmProvider = isAssistedOrFull
+    ? (o.llmProviderInstance || buildProviderFromOptions(o))
+    : null;
   const stageOutputs = isFull && o.noCheckpoint !== true;
 
   const manifestOpts = {
@@ -886,12 +915,21 @@ async function rebuild(packagePath, auditResults, opts) {
   try {
     await unpack(packagePath, workDir);
 
-    const fixers = loadFixers(fixersDir);
+    const fixers = loadFixers(fixersDir, fixerTiers);
     const grouped = groupByFile(violations);
     // Build the per-package sibling list once so fixers like
     // `wire-captions-track` can locate companion files (.vtt etc.).
     const siblings = listSiblings(workDir);
-    const packageContext = { siblings };
+    // packageContext threads through every fixer's apply(). v4.1 added
+    // `provider` and `options` so assisted-tier fixers can call the LLM
+    // through a per-rebuild provider instance (engagement-isolated).
+    const packageContext = {
+      siblings,
+      provider: llmProvider,
+      options: o,
+      engagementId,
+      packageName
+    };
 
     for (const [filePath, fileViolations] of grouped.entries()) {
       // No file-level path means we cannot localize the fix; defer.
@@ -1070,7 +1108,11 @@ async function rebuild(packagePath, auditResults, opts) {
         stageOutputs,
         transformersDir: o.transformersDir || path.resolve(__dirname, '../transformers'),
         logger,
-        now
+        now,
+        // v5.1: thread the per-rebuild provider + judgment options into the
+        // transformer pass. Same provider instance the fixers got.
+        provider: llmProvider,
+        options: o
       });
     }
 
@@ -1228,7 +1270,11 @@ async function rebuildLibrary(directory, opts) {
         engagementId: o.engagementId,
         packageName,
         outputDir: packageDir,
-        signal: o.signal
+        signal: o.signal,
+        // v4.1: thread LLM gating + model through to per-package rebuilds.
+        llmProvider: o.llmProvider,
+        llmKeyFromEnv: o.llmKeyFromEnv,
+        llmModel: o.llmModel
       });
 
       // 3. Deferred-tier short-circuit: render summary only, no zip on disk,

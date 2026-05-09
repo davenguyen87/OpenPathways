@@ -48,6 +48,7 @@ const {
   applyMods,
   linkPatchToTransform
 } = require('../rebuild/types');
+const { classifyWidget } = require('../lib/transformer-judgment');
 
 const TRANSFORMER_ID = 'widget-replacement-dialog';
 const FAMILY = 'widget';
@@ -97,19 +98,105 @@ module.exports = {
 
     const findings = findingsFor(packageContext);
     const bypass = bypassAuditGate(packageContext);
+    const threshold = packageContext?.opts?.llmJudgmentConfidenceThreshold ?? 0.7;
 
     for (const file of htmlFiles(packageContext)) {
       const plan = planForFile(file, findings, bypass);
       for (const d of plan.declines) deferred.push(d);
       if (plan.substitutions.length === 0) continue;
 
-      const mods = plan.substitutions.map((s) => ({
+      // LLM judgment: classify each heuristic dialog candidate before emitting
+      // patches. Dialog plans include dialog-wrapper subs and per-trigger-rewrite
+      // subs in one flat array. We only call the LLM on the dialog wrappers
+      // (they carry the full dialog HTML); trigger subs always flow through
+      // unchanged. If the LLM rejects the dialog wrapper, the trigger rewrite
+      // associated with that dialog still ships — the consultant catches the
+      // mismatch at checkpoint review. (Wholesale dialog+trigger filtering by
+      // ID is a v5.2 nicety; today's heuristic emits triggers only when the
+      // dialog matches, so this edge case is rare.)
+      const dialogSubs = plan.substitutions.filter(
+        (s) => s.rationale && /dialog|modal/i.test(s.rationale)
+      );
+      const acceptedDialogSubs = [];
+      const droppedDialogIds = new Set();
+      const otherSubs = plan.substitutions.filter((s) => !dialogSubs.includes(s));
+
+      for (const sub of dialogSubs) {
+        if (packageContext.provider) {
+          const $ = cheerio.load(file.content, { decodeEntities: false });
+          const candidateRoot = $('*').toArray().find((el) =>
+            el.attribs && hasClassToken(el, DIALOG_CLASS_TOKENS)
+          );
+          const structure = candidateRoot ? {
+            tagName: (candidateRoot.name || 'div').toLowerCase(),
+            childCount: (candidateRoot.children || []).filter((c) => c.type === 'tag').length,
+            hasButtons: $(candidateRoot).find('button, [role="button"], [data-dismiss]').length > 0,
+            hasForm: $(candidateRoot).find('form').length > 0,
+            headingCount: $(candidateRoot).find('h1,h2,h3,h4,h5,h6').length
+          } : { tagName: 'div', childCount: 0, hasButtons: false, hasForm: false, headingCount: 0 };
+          const classTokens = candidateRoot
+            ? ((candidateRoot.attribs && candidateRoot.attribs.class) || '').split(/\s+/).filter(Boolean)
+            : [];
+          const result = await classifyWidget({
+            packageContext,
+            candidate: {
+              file: file.path,
+              html: sub.originalText,
+              classes: classTokens,
+              structure,
+              rationale: `matched DIALOG_CLASS_TOKENS on wrapper; ${structure.childCount} children`
+            },
+            expectedType: 'dialog',
+            options: packageContext.opts || {},
+            provider: packageContext.provider
+          });
+          if (result.ok) {
+            let effectiveVerdict = result.verdict;
+            if (result.verdict === 'match' && result.confidence < threshold) {
+              effectiveVerdict = 'uncertain';
+            }
+            if (effectiveVerdict === 'no-match') {
+              deferred.push({
+                criterion: '4.1.2',
+                triage: TRIAGE,
+                reason: `LLM rejected as not a dialog widget: ${result.rationale}`,
+                file: file.path,
+                line: 0
+              });
+              droppedDialogIds.add(sub.offset);
+              continue;
+            }
+            sub._judgment = {
+              source: 'llm',
+              verdict: effectiveVerdict,
+              confidence: result.confidence,
+              rationale: result.rationale,
+              ...result.provenance
+            };
+          } else {
+            log.push(`[${TRANSFORMER_ID}] LLM judgment skipped for ${file.path}: ${result.reason}`);
+          }
+        }
+        acceptedDialogSubs.push(sub);
+      }
+
+      // Compose the final substitution list. When no provider is set,
+      // acceptedDialogSubs === dialogSubs and otherSubs is everything else, so
+      // finalSubs equals plan.substitutions byte-for-byte (preserving the v5
+      // round-trip contract that revert tests rely on).
+      const finalSubs = packageContext.provider
+        ? [...acceptedDialogSubs, ...otherSubs]
+        : plan.substitutions;
+      if (finalSubs.length === 0) continue;
+      void droppedDialogIds;
+
+      const mods = finalSubs.map((s) => ({
         offset: s.offset,
         originalText: s.originalText,
         replacementText: s.replacementText
       }));
 
-      for (const sub of plan.substitutions) {
+      for (const sub of finalSubs) {
         const patch = buildPatch({
           fixer: TRANSFORMER_ID,
           criterion: sub.criterion,
@@ -126,14 +213,17 @@ module.exports = {
           // See widget-replacement-tabs for rationale on contextChars: 0.
           contextChars: 0
         });
+        if (sub._judgment) patch._judgment = sub._judgment;
         patches.push(patch);
         filesAffected.add(file.path);
       }
 
       const newContent = applyMods(file.content, mods);
       updatedFiles.push({ path: file.path, newContent });
-      log.push(`[${TRANSFORMER_ID}] replaced ${plan.substitutions.length} dialog(s) in ${file.path}`);
+      log.push(`[${TRANSFORMER_ID}] replaced ${acceptedDialogSubs.length} dialog(s) in ${file.path}`);
     }
+
+    const firstJudgedPatch = patches.find((p) => p._judgment);
 
     /** @type {Transform} */
     const transform = {
@@ -156,7 +246,8 @@ module.exports = {
           : `Replaced ${patches.length} div-soup modal(s) with the Prism ARIA Dialog widget across ${filesAffected.size} page(s).`,
       previewPath: `rebuild-preview.html#${TRANSFORMER_ID}`,
       requiresCheckpointApproval: true,
-      status: 'pending-checkpoint'
+      status: 'pending-checkpoint',
+      ...(firstJudgedPatch ? { judgment: firstJudgedPatch._judgment } : {})
     };
 
     const linkedPatches = patches.map((p, i) =>

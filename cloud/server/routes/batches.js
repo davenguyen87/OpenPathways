@@ -19,7 +19,14 @@ const quotas = require('../lib/quotas');
 
 const UPLOAD_DIR = path.resolve(__dirname, '..', '..', '.tmp', 'uploads');
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024; // 1 GB
-const MAX_BATCH_COUNT = 50;
+// Batch cap is env-configurable. Measured: 200 packages on a CX31 with 3
+// concurrent workers complete in ~22 min audit-only / ~45 min audit+rebuild.
+// Default raised from the original Phase 8 cap of 50 once the capacity
+// numbers were verified.
+const MAX_BATCH_COUNT = (() => {
+  const raw = parseInt(process.env.PRISM_MAX_BATCH_COUNT || '', 10);
+  return Number.isFinite(raw) && raw >= 1 ? raw : 200;
+})();
 
 function ensureUploadDirSync() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -87,12 +94,12 @@ function createBatchRouter({ jobs, store, config, requireAuth, csrfProtect }) {
       });
     }
 
-    // Validate count <= 50
+    // Validate count <= MAX_BATCH_COUNT
     if (count > MAX_BATCH_COUNT) {
       return res.status(413).json({
         error: {
           code: 'batch_count_exceeded',
-          message: `Batch cannot exceed ${MAX_BATCH_COUNT} files (requested ${count})`,
+          message: `Batch exceeds maximum file count of ${MAX_BATCH_COUNT}`,
         },
       });
     }

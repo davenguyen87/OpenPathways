@@ -42,6 +42,16 @@ async function auditLibrary(directory, options = {}) {
     fixDryRun = false,
     onProgress = null,
     signal = null,
+    // v3.1: narrative gating + per-package budgets, forwarded to writeReports
+    // and (for the rollup) consumed locally to call generateLibrarySynthesis.
+    llmProvider = null,
+    llmKeyFromEnv = null,
+    llmModel = null,
+    llmNarrative,
+    llmNarrativeTokenBudget,
+    llmNarrativeCriterionCap,
+    brandConfigPath = null,
+    engagementRedact = false,
   } = options;
 
   if (!engagementId) {
@@ -131,8 +141,15 @@ async function auditLibrary(directory, options = {}) {
           packageType: result.packageType,
           packagePath: zipPath,
           engagementId,
-          engagementRedact: false, // TODO: pass from caller if needed
-          brandConfigPath: null, // TODO: pass from caller if needed
+          engagementRedact,
+          brandConfigPath,
+          // v3.1: per-package narrative gating + budgets.
+          llmProvider,
+          llmKeyFromEnv,
+          llmModel,
+          llmNarrative,
+          llmNarrativeTokenBudget,
+          llmNarrativeCriterionCap,
         },
       });
 
@@ -162,12 +179,36 @@ async function auditLibrary(directory, options = {}) {
   const libraryRollup = rollupLibrary(packageRollups);
   const library = aggregateLibrary(packageResults, libraryRollup.totalMinutes);
 
+  // v3.1: cross-package synthesis. Best-effort — if the provider is missing,
+  // misconfigured, or fails, the rollup renders without the synthesis block.
+  let librarySynthesis = null;
+  if (llmNarrative !== false && (llmProvider || llmKeyFromEnv)) {
+    try {
+      const { buildProviderFromOptions } = require('./llm-provenance');
+      const { generateLibrarySynthesis } = require('./audit-narrative');
+      const provider = buildProviderFromOptions({ llmProvider, llmKeyFromEnv, llmModel });
+      if (provider) {
+        librarySynthesis = await generateLibrarySynthesis({
+          libraryAudit: library,
+          options: {
+            engagementId,
+            llmNarrativeTokenBudget,
+            redactClientName: engagementRedact
+          },
+          provider
+        });
+      }
+    } catch (_err) {
+      // Synthesis is optional; the per-package narratives are the primary surface.
+    }
+  }
+
   // Render and write library rollup
   const htmlPath = path.join(baseEngagementDir, '_library-rollup.html');
   const mdPath = path.join(baseEngagementDir, '_library-rollup.md');
 
-  const htmlContent = renderLibraryRollupHtml(library, { engagementId });
-  const mdContent = renderLibraryRollupMarkdown(library, { engagementId });
+  const htmlContent = renderLibraryRollupHtml(library, { engagementId, librarySynthesis });
+  const mdContent = renderLibraryRollupMarkdown(library, { engagementId, librarySynthesis });
 
   await fs.mkdir(baseEngagementDir, { recursive: true });
   await fs.writeFile(htmlPath, htmlContent, 'utf8');

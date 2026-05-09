@@ -327,6 +327,20 @@ function renderTransformCard(transform, patchById, isReview) {
       ? `${escapeHtml(provenance.source)} • ${escapeHtml(provenance.model)}`
       : escapeHtml(provenance.source || '');
 
+  // AI verdict pill (v5.1): present only when transform.judgment is set.
+  const judgment = transform.judgment;
+  let aiVerdictPill = '';
+  if (judgment && typeof judgment === 'object') {
+    const pct = Math.round((judgment.confidence || 0) * 100);
+    const model = escapeHtml(judgment.model || '');
+    const ratTitle = escapeHtml(judgment.rationale || '');
+    if (judgment.verdict === 'match') {
+      aiVerdictPill = `<span class="ai-verdict-pill ai-verdict-match" title="${ratTitle}">AI-CONFIRMED · ${model} · ${pct}%</span>`;
+    } else if (judgment.verdict === 'uncertain') {
+      aiVerdictPill = `<span class="ai-verdict-pill ai-verdict-uncertain" title="${ratTitle}">AI-UNCERTAIN · ${model} · ${pct}%</span>`;
+    }
+  }
+
   const criteriaChips = criteria
     .map((c) => `<span class="chip-static chip-criterion">${escapeHtml(c)}</span>`)
     .join('');
@@ -368,6 +382,7 @@ function renderTransformCard(transform, patchById, isReview) {
     provLabel
       ? `<span class="chip-static chip-provenance">${provLabel}</span>`
       : '',
+    aiVerdictPill,
     '</div>',
     `<div class="tc-id"><code>${escapeHtml(id)}</code></div>`,
     '</header>',
@@ -383,6 +398,10 @@ function renderTransformCard(transform, patchById, isReview) {
     patchList,
 
     `<p class="tc-rationale">${escapeHtml(transform.rationale || '')}</p>`,
+
+    judgment && typeof judgment === 'object' && judgment.rationale
+      ? `<p class="ai-rationale"><strong>AI rationale:</strong> ${escapeHtml(judgment.rationale)}</p>`
+      : '',
 
     renderApprovalForm(transform, isReview),
 
@@ -829,6 +848,24 @@ body {
 .chip-status-reverted { background: var(--ink); color: var(--paper); }
 .chip-provenance { background: var(--ink); color: var(--paper); }
 .chip-manifest { background: var(--sev-serious); color: #fff; border-color: var(--ink); }
+
+.ai-verdict-pill {
+  display: inline-flex; align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.ai-verdict-match    { background: rgba(27,122,61,0.15); color: var(--ok); border-color: var(--ok); }
+.ai-verdict-uncertain { background: rgba(242,134,25,0.15); color: #b85d00; border-color: var(--cta); }
+
+.ai-rationale {
+  margin: 6px 0 0;
+  padding: 0 18px;
+  font: 500 13px var(--font-sans);
+  color: var(--ink-3);
+}
 
 .tc-scope {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;

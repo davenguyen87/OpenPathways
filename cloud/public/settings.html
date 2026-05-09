@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Settings &mdash; Prism</title>
+  <!-- Pre-paint: apply saved theme before first paint to prevent flash. -->
+  <script>(function(){try{var t=localStorage.getItem('op-theme');var p=(t==='light'||t==='dark')?t:'auto';var r=(p==='auto')?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;var d=document.documentElement;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);}catch(e){}})();</script>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    /* Settings-specific layout */
+    .settings-main {
+      max-width: 44rem;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+    .settings-title {
+      font-family: var(--serif);
+      font-size: var(--fs-2xl, 1.75rem);
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+    }
+    .settings-sub {
+      margin: 0 0 2.5rem;
+      color: var(--ink-3);
+    }
+    .settings-card {
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 1.5rem 1.5rem 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .settings-card h2 {
+      font-family: var(--serif);
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 0 0 1.25rem;
+    }
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .field-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .field-row label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--ink-2);
+    }
+    .field-row input,
+    .field-row select {
+      font-family: var(--sans);
+      font-size: 0.9375rem;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--field-border);
+      border-radius: 5px;
+      padding: 0.45rem 0.625rem;
+      width: 100%;
+    }
+    .field-row input:focus,
+    .field-row select:focus {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .provider-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      padding: 0.25rem 0.75rem;
+      border-radius: 99px;
+      background: var(--accent-soft);
+      color: var(--accent-ink);
+      border: 1px solid var(--rule);
+    }
+    .current-key-hint {
+      font-size: 0.8125rem;
+      color: var(--ink-3);
+      margin-top: 0.2rem;
+      font-family: var(--mono);
+    }
+    .btn-row {
+      display: flex;
+      gap: 0.625rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .status-area {
+      margin-top: 1rem;
+      min-height: 1.5rem;
+      font-size: 0.875rem;
+    }
+    .status-ok {
+      color: var(--ok);
+      font-weight: 500;
+    }
+    .status-err {
+      color: var(--critical);
+      font-weight: 500;
+    }
+    .status-pending {
+      color: var(--ink-3);
+    }
+  </style>
+</head>
+<body>
+  <!-- WCAG 2.4.1 — bypass blocks -->
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="brand-link">Prism</a>
+      <span class="brand-tag">SCORM &middot; AICC &middot; cmi5 &middot; xAPI auditor</span>
+    </div>
+    <div class="topbar-meta" id="topbar-meta">
+      <span id="topbar-user" class="topbar-user hidden"></span>
+      <a href="/settings" class="btn btn-link topbar-settings" id="topbar-settings" aria-current="page">Settings</a>
+      <button id="topbar-logout" class="btn btn-link hidden" type="button">Sign out</button>
+      <button class="theme-toggle" id="theme-toggle" type="button"
+              aria-label="Theme: auto, matches your system. Activate to switch to light.">
+        <svg class="theme-icon theme-icon-auto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/>
+          <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+          <path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" class="settings-main" tabindex="-1">
+    <h1 class="settings-title">Workspace settings</h1>
+    <p class="settings-sub">Configure LLM features for your workspace. Your API key is stored encrypted and never logged.</p>
+
+    <div class="settings-card">
+      <h2>LLM API key</h2>
+
+      <div class="field-group">
+        <!-- Provider — locked to Anthropic in v1 -->
+        <div class="field-row">
+          <label id="provider-label">Provider</label>
+          <div aria-labelledby="provider-label">
+            <span class="provider-pill" role="img" aria-label="Anthropic (only provider available)">Anthropic</span>
+          </div>
+        </div>
+
+        <!-- API key -->
+        <div class="field-row">
+          <label for="api-key-input">API key</label>
+          <input
+            type="password"
+            id="api-key-input"
+            name="apiKey"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="sk-..."
+            aria-describedby="api-key-hint"
+          >
+          <span class="current-key-hint" id="api-key-hint" role="status" aria-live="polite"></span>
+        </div>
+
+        <!-- Model picker -->
+        <div class="field-row">
+          <label for="model-select">Model</label>
+          <select id="model-select" name="model">
+            <option value="claude-haiku-4-5">claude-haiku-4-5 (default — fast &amp; affordable)</option>
+            <option value="claude-sonnet-4-6">claude-sonnet-4-6 (balanced)</option>
+            <option value="claude-opus-4-7">claude-opus-4-7 (most capable)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="btn-row">
+        <button class="btn btn-primary" id="save-btn" type="button">Save</button>
+        <button class="btn btn-secondary" id="test-btn" type="button">Test</button>
+        <button class="btn btn-link" id="delete-btn" type="button" style="color:var(--critical)">Delete key</button>
+      </div>
+
+      <!-- Status feedback -->
+      <div class="status-area" id="status-area" role="status" aria-live="polite" aria-atomic="true"></div>
+    </div>
+  </main>
+
+  <footer class="sitefoot" role="contentinfo">
+    <div class="sitefoot-inner">
+      <span class="sitefoot-mark">Prism</span>
+      <ul class="sitefoot-nav">
+        <li><a href="/about">About</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script src="/theme.js" defer></script>
+  <script src="/settings.js" defer></script>
+</body>
+</html>

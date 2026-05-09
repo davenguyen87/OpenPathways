@@ -510,10 +510,14 @@ describe('rebuild-pipeline: undo round-trip', () => {
 // ─── Test: tier dispatch — assisted mode ──────────────────────────────────
 
 describe('rebuild-pipeline: tier dispatch', () => {
-  it('mode=assisted returns no zip, empty patches, all findings deferred', async () => {
+  it('mode=assisted runs safe-tier fixers and writes a zip when no LLM provider is set', async () => {
+    // v4 short-circuited mode=assisted to a no-op deferred stub. v4.1
+    // wires assisted-tier fixers; without --llm-provider, those fixers'
+    // canFix() declines (or apply() emits no patch) and the violation
+    // defers — but safe-tier fixers still run normally. Result: a zip is
+    // written and decorative-image violations are mechanically fixed.
     const auditResults = syntheticAudit([
-      { criterion: '1.1.1', file: 'page1.html', line: 11, message: 'missing alt', snippet: '<img src="spacer.gif">', triage: 'auto-fix safe' },
-      { criterion: '3.3.2', file: 'page2.html', line: 10, message: 'missing label', snippet: '<input>', triage: 'auto-fix safe' }
+      { criterion: '1.1.1', file: 'page1.html', line: 11, message: 'missing alt', snippet: '<img src="spacer.gif">', triage: 'auto-fix safe' }
     ]);
 
     const result = await rebuild(FX_DECO, auditResults, {
@@ -522,12 +526,13 @@ describe('rebuild-pipeline: tier dispatch', () => {
       packageName: 'rebuild-decorative-imgs.zip'
     });
 
-    expect(result.rebuiltZipPath).toBeNull();
-    expect(result.manifest.patches).toHaveLength(0);
-    expect(result.manifest.deferred).toHaveLength(2);
-    for (const d of result.manifest.deferred) {
-      expect(d.reason).toMatch(/tier=assisted/);
-    }
+    expect(result.rebuiltZipPath).not.toBeNull();
+    expect(result.manifest.schemaVersion).toBe('1.0.0');
+    // The decorative-image violation gets claimed by the safe-tier
+    // add-alt-decorative fixer; mode=assisted just adds assisted fixers
+    // alongside the safe ones — it does not disable them.
+    expect(result.manifest.patches.length).toBeGreaterThan(0);
+    expect(result.manifest.patches.every((p) => p.tier === 'safe')).toBe(true);
   });
 
   it('mode=full stages output under .rebuild-staging/ when transformers are present', async () => {
@@ -769,5 +774,155 @@ describe.skip('rebuild-pipeline: no-network invariant (covered by npm run check-
 
   it('check-no-network exits 0', () => {
     expect(true).toBe(true);
+  });
+});
+
+// ─── Test: v4.1 assisted-tier with injected fake provider ────────────────
+
+const FX_ASSISTED = path.join(FIXTURES_DIR, 'rebuild-assisted-judgment.zip');
+
+/**
+ * Build a fake LLM provider that records every generate() call and returns
+ * canned responses keyed by what's in the user prompt. Lets the test verify
+ * (a) the fixers reached the LLM, (b) the prompts are well-formed, and (c)
+ * the manifest carries full provenance — without any real network call.
+ */
+function makeFakeProvider(responsesByPredicate) {
+  const calls = [];
+  return {
+    name: 'anthropic',
+    model: 'claude-haiku-4-5',
+    calls,
+    async generate({ systemPrompt, userPrompt, maxTokens }) {
+      calls.push({ systemPrompt, userPrompt, maxTokens });
+      // Pick the first matching predicate; default to a generic safe
+      // response so every fixer's validator can pass.
+      for (const [predicate, text] of responsesByPredicate) {
+        if (predicate(userPrompt)) {
+          return {
+            text,
+            model: 'claude-haiku-4-5',
+            usage: { inputTokens: 100, outputTokens: 20 },
+            latencyMs: 42
+          };
+        }
+      }
+      return {
+        text: 'Quarterly revenue chart',
+        model: 'claude-haiku-4-5',
+        usage: { inputTokens: 50, outputTokens: 5 },
+        latencyMs: 17
+      };
+    }
+  };
+}
+
+describe('rebuild-pipeline: v4.1 assisted-tier with fake provider', () => {
+  // Skip if the fixture isn't present (CI without the v4.1 fixture stays green).
+  const haveFixture = fs.existsSync(FX_ASSISTED);
+  const itIf = haveFixture ? it : it.skip;
+
+  itIf('emits assisted patches with full LLM provenance and stays at schema 1.0.0', async () => {
+    const fake = makeFakeProvider([
+      // Alt-text prompt mentions filename and "alt text"; return descriptive alt.
+      [(p) => /alt text|filename/i.test(p), 'Quarterly revenue trend chart for 2025'],
+      // Link-text prompt mentions "vague" or "rewrite"; return a clear action.
+      [(p) => /link|rewrite|vague/i.test(p), 'Download the Q4 financial report'],
+      // Form-label prompt mentions "label" / "form control".
+      [(p) => /form control|label/i.test(p), 'Email address']
+    ]);
+
+    const auditResults = {
+      violations: [
+        // 1.1.1 content image — claimed by generate-alt-text
+        {
+          criterion: '1.1.1',
+          file: 'index.html',
+          line: 1,
+          message: 'img element missing alt attribute',
+          snippet: '<img src="revenue-2025.png">',
+          triage: 'auto-fix assisted'
+        },
+        // 2.4.4 vague link — claimed by rewrite-link-text
+        {
+          criterion: '2.4.4',
+          file: 'index.html',
+          line: 1,
+          message: 'Link text "click here" is too vague to convey the link\'s purpose out of context.',
+          snippet: '<a href="report-q4.pdf">click here</a>',
+          triage: 'auto-fix assisted'
+        }
+      ],
+      scorecard: { failedCriteria: 2, criteriaResults: [] }
+    };
+
+    const outDir = makeTmp('rb-assisted-fake-out');
+
+    const result = await rebuild(FX_ASSISTED, auditResults, {
+      mode: 'assisted',
+      engagementId: 'test-assisted-fake',
+      packageName: 'rebuild-assisted-judgment.zip',
+      outputDir: outDir,
+      llmProviderInstance: fake
+    });
+
+    // The orchestrator wrote a rebuilt zip and bound the manifest at v1.0.0.
+    expect(result.rebuiltZipPath).not.toBeNull();
+    expect(result.manifest.schemaVersion).toBe('1.0.0');
+
+    // The fake provider was actually invoked.
+    expect(fake.calls.length).toBeGreaterThan(0);
+    expect(fake.calls[0].systemPrompt.length).toBeGreaterThan(0);
+    expect(fake.calls[0].userPrompt.length).toBeGreaterThan(0);
+
+    // Every assisted patch carries full provenance per the v4.1 PRD.
+    const assistedPatches = result.manifest.patches.filter((p) => p.tier === 'assisted');
+    expect(assistedPatches.length).toBeGreaterThan(0);
+    for (const patch of assistedPatches) {
+      expect(patch.confidence).toBe('needs-review');
+      expect(patch.provenance.source).toBe('llm');
+      expect(patch.provenance.provider).toBe('anthropic');
+      expect(patch.provenance.model).toBe('claude-haiku-4-5');
+      expect(patch.provenance.promptHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(typeof patch.provenance.latencyMs).toBe('number');
+      expect(patch.provenance.usage.inputTokens).toBeGreaterThan(0);
+      expect(patch.provenance.usage.outputTokens).toBeGreaterThan(0);
+    }
+  });
+
+  itIf('without LLM provider, assisted-claimable violations defer with a clear reason', async () => {
+    const auditResults = {
+      violations: [
+        {
+          criterion: '1.1.1',
+          file: 'index.html',
+          line: 1,
+          message: 'img element missing alt attribute',
+          snippet: '<img src="revenue-2025.png">',
+          triage: 'auto-fix assisted'
+        }
+      ],
+      scorecard: { failedCriteria: 1, criteriaResults: [] }
+    };
+
+    const outDir = makeTmp('rb-assisted-no-llm-out');
+
+    const result = await rebuild(FX_ASSISTED, auditResults, {
+      mode: 'assisted',
+      engagementId: 'test-assisted-no-llm',
+      packageName: 'rebuild-assisted-judgment.zip',
+      outputDir: outDir
+      // No llmProvider, no llmProviderInstance — fixers must defer cleanly.
+    });
+
+    // No assisted patches; the alt-text violation defers with the canonical
+    // "--llm-provider not set" reason — matching the PRD's acceptance shape.
+    const assistedPatches = (result.manifest.patches || []).filter((p) => p.tier === 'assisted');
+    expect(assistedPatches).toHaveLength(0);
+    const altDeferred = (result.manifest.deferred || []).filter(
+      (d) => d.criterion === '1.1.1'
+    );
+    expect(altDeferred.length).toBeGreaterThan(0);
+    expect(altDeferred.some((d) => /llm-provider not set/i.test(d.reason))).toBe(true);
   });
 });

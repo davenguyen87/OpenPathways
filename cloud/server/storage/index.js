@@ -39,4 +39,20 @@ function createStorage(opts = {}) {
   throw new Error(`Unknown STORAGE_DRIVER: ${driver} (expected 'local-fs' or 's3')`);
 }
 
-module.exports = { createStorage, defaultBaseDir };
+/**
+ * Convenience factory: create a StagingStorage that wraps an existing base
+ * storage adapter. The staging adapter prefixes every key with
+ * `staging/<jobId>/` and provides putStaging / getStaging / listStaging /
+ * clearStaging helpers.
+ *
+ * @param {object} baseStorage - LocalFsStorage or S3Storage instance
+ * @param {object} [opts]
+ * @param {number} [opts.retentionDays=7]
+ * @returns {StagingStorage}
+ */
+function createStagingFromStorage(baseStorage, opts = {}) {
+  const { createStagingFromStorage: _create } = require('./staging');
+  return _create(baseStorage, opts);
+}
+
+module.exports = { createStorage, createStagingFromStorage, defaultBaseDir };

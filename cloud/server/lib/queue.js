@@ -23,12 +23,17 @@
  */
 
 const QUEUE_NAME = 'runAudit';
+// Phase 12: second queue for rebuild jobs. Separate from runAudit so the
+// worker can apply independent concurrency caps (WORKER_REBUILD_CONCURRENCY).
+const REBUILD_QUEUE_NAME = 'runRebuild';
 
 class InProcessQueue {
   driver() { return 'in-process'; }
   async start() { /* no-op */ }
   async stop() { /* no-op */ }
   async enqueue(_jobId) { /* JobManager._tick handles it */ }
+  // Phase 12: rebuild jobs also use in-process dispatch.
+  async enqueueRebuild(_jobId) { /* JobManager._tick handles it */ }
 }
 
 class PgBossQueue {
@@ -39,10 +44,12 @@ class PgBossQueue {
    *                                  Web side passes a noop; the worker passes
    *                                  the real audit-execution closure.
    */
-  constructor({ connectionString, runJob }) {
+  constructor({ connectionString, runJob, runRebuildJob }) {
     if (!connectionString) throw new Error('PgBossQueue: connectionString is required');
     this.connectionString = connectionString;
     this.runJob = runJob || null;
+    // Phase 12: rebuild queue subscriber (worker side only).
+    this.runRebuildJob = runRebuildJob || null;
     this.boss = null;
   }
 
@@ -68,6 +75,17 @@ class PgBossQueue {
         }
       });
     }
+
+    // Phase 12: rebuild subscriber. runRebuildJob is passed by the worker;
+    // the web container passes null so it never dequeues rebuild messages.
+    if (typeof this.runRebuildJob === 'function') {
+      await this.boss.work(REBUILD_QUEUE_NAME, async (job) => {
+        const data = job && job.data;
+        if (data && data.jobId) {
+          await this.runRebuildJob(data.jobId);
+        }
+      });
+    }
   }
 
   async stop() {
@@ -81,17 +99,24 @@ class PgBossQueue {
     if (!this.boss) throw new Error('PgBossQueue: not started');
     await this.boss.send(QUEUE_NAME, { jobId });
   }
+
+  // Phase 12: enqueue a rebuild job to the separate runRebuild queue.
+  async enqueueRebuild(jobId) {
+    if (!this.boss) throw new Error('PgBossQueue: not started');
+    await this.boss.send(REBUILD_QUEUE_NAME, { jobId });
+  }
 }
 
-function createQueue({ runJob } = {}) {
+function createQueue({ runJob, runRebuildJob } = {}) {
   const driver = (process.env.WORKER_QUEUE || 'inprocess').toLowerCase();
   if (driver === 'pgboss' || driver === 'pg-boss') {
     return new PgBossQueue({
       connectionString: process.env.DATABASE_URL,
       runJob,
+      runRebuildJob,
     });
   }
   return new InProcessQueue();
 }
 
-module.exports = { createQueue, InProcessQueue, PgBossQueue, QUEUE_NAME };
+module.exports = { createQueue, InProcessQueue, PgBossQueue, QUEUE_NAME, REBUILD_QUEUE_NAME };

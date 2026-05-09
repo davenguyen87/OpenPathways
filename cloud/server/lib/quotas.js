@@ -86,4 +86,53 @@ async function check({ store, userId, addingBytes, addingCount, config }) {
   return { allowed: true };
 }
 
-module.exports = { check, readQuotaConfig, DEFAULT_CONCURRENT, DEFAULT_UPLOADS_PER_DAY, DEFAULT_STORED_BYTES };
+// ---------------------------------------------------------------------------
+// Phase 12: rebuild quota
+// ---------------------------------------------------------------------------
+
+const DEFAULT_CONCURRENT_REBUILDS = 1;
+
+/**
+ * Enforce the per-user rebuild concurrency limit.
+ *
+ * Reads `QUOTA_CONCURRENT_REBUILDS` env (default 1). Counts the user's
+ * in-flight rebuild jobs (status pending|running, kind='rebuild') via
+ * `store.getUserRebuildAggregate()`. Throws `QuotaError` if at cap.
+ *
+ * Pattern mirrors `assertConcurrentJobsAllowed` but is a standalone function
+ * to keep the audit quota path unchanged and avoid a coupled refactor.
+ *
+ * @param {object} store   - SqliteStore | PostgresStore
+ * @param {string} userId  - required; the current authenticated user's id.
+ * @throws {QuotaError} when the user is at or over the rebuild cap.
+ */
+async function assertRebuildAllowed(store, userId) {
+  if (!userId) return; // no-auth local mode — no limit
+  const raw = process.env.QUOTA_CONCURRENT_REBUILDS;
+  const cap = (raw !== undefined && raw !== '' && Number.isFinite(Number(raw)) && Number(raw) >= 0)
+    ? Number(raw)
+    : DEFAULT_CONCURRENT_REBUILDS;
+
+  if (typeof store.getUserRebuildAggregate !== 'function') {
+    // Store adapter predates Phase 12 migration — skip (defensive).
+    return;
+  }
+  const agg = await store.getUserRebuildAggregate(userId);
+  if (agg.concurrentRebuilds >= cap) {
+    const err = new Error(`Rebuild quota exceeded: max ${cap} in-flight rebuild(s) per user`);
+    err.code = 'QUOTA_REBUILD_CONCURRENT';
+    err.limit = cap;
+    err.current = agg.concurrentRebuilds;
+    throw err;
+  }
+}
+
+module.exports = {
+  check,
+  readQuotaConfig,
+  assertRebuildAllowed,
+  DEFAULT_CONCURRENT,
+  DEFAULT_UPLOADS_PER_DAY,
+  DEFAULT_STORED_BYTES,
+  DEFAULT_CONCURRENT_REBUILDS,
+};

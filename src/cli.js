@@ -35,6 +35,10 @@ const auditCmd = program
   .option('--json', 'Output JSON scorecard to stdout only (suppresses spinner/logs)')
   .option('--llm-provider <provider>', 'LLM provider for assisted findings (off by default; requires --llm-key-from-env)')
   .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
+  .option('--llm-model <model-id>', 'Override the provider default model (alias form, e.g. claude-sonnet-4-6)')
+  .option('--no-llm-narrative', 'Disable v3.1 narrative generation even when --llm-provider is set (useful for cost/speed in CI runs)')
+  .option('--llm-narrative-token-budget <n>', 'Per-package narrative token budget (default: 30000)', null)
+  .option('--llm-narrative-criterion-cap <n>', 'Maximum number of per-criterion remediation guides to generate (default: 12)', null)
   .option('--max-violations <n>', 'Maximum violations allowed before failing (default: unlimited)', null)
   .option('--output <dir>', 'Output directory (legacy fallback; ignored when --engagement is set)', './prism-report')
   .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
@@ -54,6 +58,10 @@ const auditLibCmd = program
   .option('--browser <browser>', 'Browser for dynamic checks: chromium|firefox|webkit (default: chromium)', 'chromium')
   .option('--llm-provider <provider>', 'LLM provider for assisted findings (off by default; requires --llm-key-from-env)')
   .option('--llm-key-from-env <env-var>', 'Environment variable holding LLM API key (off by default; requires --llm-provider)')
+  .option('--llm-model <model-id>', 'Override the provider default model (alias form, e.g. claude-sonnet-4-6)')
+  .option('--no-llm-narrative', 'Disable v3.1 per-package narrative + library synthesis even when --llm-provider is set')
+  .option('--llm-narrative-token-budget <n>', 'Per-package narrative token budget (default: 30000)', null)
+  .option('--llm-narrative-criterion-cap <n>', 'Maximum number of per-criterion remediation guides per package (default: 12)', null)
   .option('--package-type <type>', 'Package type: scorm12|scorm2004|aicc|cmi5|xapi|auto (default: auto)', 'auto')
   .option('--standard <standard>', 'WCAG standard: wcag21|wcag22 (default: wcag21)', 'wcag21')
   .option('--timeout-dynamic <ms>', 'Timeout (ms) per SCO for dynamic checks (default: 30000)', '30000')
@@ -207,6 +215,17 @@ async function auditAction(packagePath, cmdOpts) {
       brandConfigPath: cmdOpts.brandConfig,
       llmProvider: cmdOpts.llmProvider,
       llmKeyFromEnv: cmdOpts.llmKeyFromEnv,
+      // v3.1: narrative generation flags. commander emits cmdOpts.llmNarrative
+      // for `--no-llm-narrative` (boolean false); the writeReports default is
+      // true, so undefined here = on, false = off.
+      llmModel: cmdOpts.llmModel,
+      llmNarrative: cmdOpts.llmNarrative,
+      llmNarrativeTokenBudget: cmdOpts.llmNarrativeTokenBudget
+        ? parseInt(cmdOpts.llmNarrativeTokenBudget, 10)
+        : undefined,
+      llmNarrativeCriterionCap: cmdOpts.llmNarrativeCriterionCap
+        ? parseInt(cmdOpts.llmNarrativeCriterionCap, 10)
+        : undefined,
     };
 
     // Generate reports
@@ -327,6 +346,15 @@ async function auditLibraryAction(directory, cmdOpts) {
         engagementRedact: cmdOpts.engagementRedact,
         llmProvider: cmdOpts.llmProvider,
         llmKeyFromEnv: cmdOpts.llmKeyFromEnv,
+        // v3.1: forward narrative flags to per-package audits + the rollup.
+        llmModel: cmdOpts.llmModel,
+        llmNarrative: cmdOpts.llmNarrative,
+        llmNarrativeTokenBudget: cmdOpts.llmNarrativeTokenBudget
+          ? parseInt(cmdOpts.llmNarrativeTokenBudget, 10)
+          : undefined,
+        llmNarrativeCriterionCap: cmdOpts.llmNarrativeCriterionCap
+          ? parseInt(cmdOpts.llmNarrativeCriterionCap, 10)
+          : undefined,
       });
 
       spinner.succeed(`Audited ${libraryResult.packages.length} packages`);

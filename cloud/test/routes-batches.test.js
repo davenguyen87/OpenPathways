@@ -122,17 +122,22 @@ describe('POST /api/batches', () => {
     expect(batch.status).toBe('active');
   });
 
-  it('rejects count=51 with 413 batch_count_exceeded', async () => {
+  it('rejects count above the configured cap with 413 batch_count_exceeded', async () => {
+    // Cap is now env-configurable via PRISM_MAX_BATCH_COUNT (default 200,
+    // raised from the original Phase 8 cap of 50 once CX31 capacity was
+    // verified). Probe with cap+1 — read MAX_BATCH_COUNT off the route module
+    // so this test stays in sync with whatever default the deployment runs.
+    const { MAX_BATCH_COUNT } = require('../server/routes/batches.js');
     const res = await request(app)
       .post('/api/batches')
       .send({
         engagementId: 'eng_test123',
-        count: 51,
+        count: MAX_BATCH_COUNT + 1,
       });
 
     expect(res.status).toBe(413);
     expect(res.body.error.code).toBe('batch_count_exceeded');
-    expect(res.body.error.message).toContain('50');
+    expect(res.body.error.message).toContain(String(MAX_BATCH_COUNT));
   });
 
   it('rejects missing engagementId with 400', async () => {
@@ -637,5 +642,70 @@ describe('POST /api/audits/batch (legacy)', () => {
     expect(res.body.error.code).toBe('endpoint_removed');
     expect(res.body.error.message).toContain('POST /api/batches');
     expect(res.body.error.message).toContain('POST /api/batches/:id/files');
+  });
+});
+
+describe('413 batch_count_exceeded message includes configured MAX_BATCH_COUNT', () => {
+  let appCustomCap;
+  let storeCustomCap;
+  let tmpDirCustomCap;
+
+  beforeEach(async () => {
+    tmpDirCustomCap = await fs.mkdtemp(path.join(os.tmpdir(), 'prism-test-cap-'));
+    const dbPath = path.join(tmpDirCustomCap, 'test.sqlite');
+    storeCustomCap = new SqliteStore({ path: dbPath });
+    await storeCustomCap.init();
+
+    const mockJobsCustomCap = {
+      create: vi.fn(async ({ uploadPath, options, originalName, batchId, userId, uploadBytes }) => {
+        const id = crypto.randomUUID();
+        const createdAt = Date.now();
+        await storeCustomCap.createJob({
+          id, status: 'pending', options: options || {}, originalName: originalName || null,
+          uploadPath, createdAt, batchId: batchId || null, userId: userId || null,
+          uploadBytes: uploadBytes || null,
+        });
+        return { id, status: 'pending', uploadPath, options, originalName, batchId, userId, uploadBytes };
+      }),
+      listSnapshots: vi.fn(async () => []),
+      snapshot: vi.fn(async () => null),
+      subscribe: vi.fn(async () => null),
+      get: vi.fn(async () => null),
+    };
+
+    // Set env to 10, then reload the batch module so MAX_BATCH_COUNT re-reads the env.
+    process.env.PRISM_MAX_BATCH_COUNT = '10';
+    vi.resetModules();
+    const { createBatchRouter: createBatchRouterCustomCap } = await import('../server/routes/batches.js');
+
+    appCustomCap = express();
+    appCustomCap.use(express.json());
+    const { router: batchRouterCustomCap } = createBatchRouterCustomCap({
+      jobs: mockJobsCustomCap,
+      store: storeCustomCap,
+      config: { isHosted: false, mode: 'local' },
+      requireAuth: null,
+      csrfProtect: null,
+    });
+    appCustomCap.use('/api', batchRouterCustomCap);
+  });
+
+  afterEach(async () => {
+    delete process.env.PRISM_MAX_BATCH_COUNT;
+    vi.resetModules();
+    await storeCustomCap.close();
+    await fs.rm(tmpDirCustomCap, { recursive: true, force: true });
+  });
+
+  it('the 413 message includes the configured MAX_BATCH_COUNT value', async () => {
+    // Post count=11, which exceeds the cap of 10 set via PRISM_MAX_BATCH_COUNT.
+    const res = await request(appCustomCap)
+      .post('/api/batches')
+      .send({ engagementId: 'eng_cap_test', count: 11 });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('batch_count_exceeded');
+    // The message must include the live cap value "10", not a hard-coded "50" or "200".
+    expect(res.body.error.message).toContain('10');
   });
 });

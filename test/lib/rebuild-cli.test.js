@@ -176,12 +176,26 @@ describe('rebuildAction', () => {
     expect(deps.rebuild).not.toHaveBeenCalled();
   });
 
-  it('exits 0 for --mode assisted without rebuilding', async () => {
+  it('--mode assisted invokes the orchestrator (v4.1: no longer early-exits)', async () => {
+    // v4 short-circuited assisted mode at the CLI; v4.1 wires the
+    // orchestrator to load assisted-tier fixers. The CLI now goes through
+    // the same code path as safe mode and forwards the LLM gating flags.
     const deps = makeDeps();
-    await rebuildAction('/path/to/test.zip', { engagement: 'eng-1', mode: 'assisted' }, deps);
-    expect(mockExit).toHaveBeenCalledWith(0);
-    expect(deps.rebuild).not.toHaveBeenCalled();
-    expect(deps.verify).not.toHaveBeenCalled();
+    await rebuildAction(
+      '/path/to/test.zip',
+      {
+        engagement: 'eng-1',
+        mode: 'assisted',
+        llmProvider: 'anthropic',
+        llmKeyFromEnv: 'FAKE_KEY'
+      },
+      deps
+    );
+    expect(deps.rebuild).toHaveBeenCalledTimes(1);
+    const passedOpts = deps.rebuild.mock.calls[0][2];
+    expect(passedOpts.mode).toBe('assisted');
+    expect(passedOpts.llmProvider).toBe('anthropic');
+    expect(passedOpts.llmKeyFromEnv).toBe('FAKE_KEY');
   });
 
   it('--mode full without --no-checkpoint stages output and exits 0 without verifying', async () => {

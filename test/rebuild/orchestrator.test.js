@@ -150,14 +150,17 @@ describe('rebuild() — safe tier', () => {
 });
 
 describe('rebuild() — tier dispatch', () => {
-  it('mode=assisted skips fixers, defers every finding, writes no zip', async () => {
+  it('mode=assisted runs safe-tier fixers when no LLM provider is set; manifest stays 1.0.0', async () => {
+    // v4.1: assisted mode no longer short-circuits. The orchestrator loads
+    // both safe and assisted fixers; without --llm-provider the assisted
+    // ones decline and the safe ones run normally. The decorative-image
+    // violation here is claimed by the safe-tier add-alt-decorative fixer.
     const inputZip = await buildFixtureZip({ htmlContent: HTML_WITH_DECORATIVE_IMG });
     const outDir = makeTmp('rb-orch-assisted-out');
 
     const auditResults = {
       violations: [
-        { criterion: '1.1.1', message: 'spacer', file: 'index.html', line: 1, triage: 'auto-fix safe' },
-        { criterion: '1.3.1', message: 'heading', file: 'index.html', line: 5, triage: 'auto-fix safe' }
+        { criterion: '1.1.1', message: 'spacer image missing alt', file: 'index.html', line: 1, snippet: '<img src="spacer.gif">', triage: 'auto-fix safe' }
       ]
     };
 
@@ -168,16 +171,13 @@ describe('rebuild() — tier dispatch', () => {
       outputDir: outDir
     });
 
-    expect(result.rebuiltZipPath).toBeNull();
-    expect(result.manifest.patches).toHaveLength(0);
-    expect(result.manifest.deferred).toHaveLength(2);
-    expect(result.manifest.deferred[0].reason).toMatch(/tier=assisted/);
-    // The assisted manifest stays at schemaVersion 1.0.0 — v4.1 byte
-    // compatibility.
+    // A zip is written (safe-tier fixer ran); patches contain the safe-tier
+    // alt="" insert; the manifest schema stays 1.0.0 (assisted is byte-
+    // compatible with v4 safe-mode manifests).
+    expect(result.rebuiltZipPath).not.toBeNull();
     expect(result.manifest.schemaVersion).toBe('1.0.0');
-    // outDir exists but should be empty (we didn't write the zip).
-    const outFiles = fs.readdirSync(outDir);
-    expect(outFiles).toHaveLength(0);
+    expect(result.manifest.patches.length).toBeGreaterThan(0);
+    expect(result.manifest.patches[0].tier).toBe('safe');
   });
 });
 

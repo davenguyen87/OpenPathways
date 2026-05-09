@@ -394,6 +394,8 @@ high-value workflow features land as v1.1 a week later.
 If hosted-online is less urgent than great-local-tool: **5 → 6 → 7 → 8 → 9
 → 10**, same total time.
 
+Phases 12 / 12.5 / 8b shipped 2026-05-08, ~12 days of focused work, delivered with parallel agents.
+
 ---
 
 ## Out of scope for v1.0 (lifted from `/web/PLAN.md`, still true)
@@ -406,6 +408,8 @@ If hosted-online is less urgent than great-local-tool: **5 → 6 → 7 → 8 →
 ---
 
 ## Phase 12 — Rebuild in cloud (~5–8 days)
+
+**Status (2026-05-08): Shipped.** Cloud rebuild surface is live: rebuild CTA, tier picker, SSE progress, checkpoint review UI, undo controls, queue separation, rate limits, integration tests. See `cloud/CLAUDE.md` § "Rebuild surfaces" for the full endpoint list and storage layout.
 
 **Goal:** A logged-in user uploads a package, runs an audit, then runs a rebuild from the same UI. Safe-tier rebuilds produce a downloadable `rebuilt.zip` directly. Full-tier rebuilds open a browser-based checkpoint review with per-transform approve/reject controls and promote on submission. Atomic transform undo lives in the same per-job UI as v4 single-patch undo.
 
@@ -447,3 +451,126 @@ If hosted-online is less urgent than great-local-tool: **5 → 6 → 7 → 8 →
 Order this **after** Phase 11 settles. Don't start Phase 12 without confirming the v5 engine ships are stable in CLI usage for at least one full Skill Loop engagement cycle — the engine is well-tested in unit + integration land but real-package edge cases will surface from consultant use first.
 
 The relevant engine modules are in `src/rebuild/`, `src/transformers/`, `src/widgets/`, and `src/reporter/rebuild-preview.js`. The per-package output contract is documented in `archive/workstreams/v5-full-tier/PRD_v5_FullTier.md` § "Manifest schema v2.0.0".
+
+---
+
+## Phase 12.5 — LLM activation in cloud (~3–4 days)
+
+**Status (2026-05-08): Shipped.** v3.1 server-env activation landed first (Wave 1: `writeReports` forwarding for `report.html`; the `report.md` gap was closed as a Wave 1 follow-up). Per-workspace BYO keys, Settings UI, cost telemetry, and rebuild LLM threading all shipped in Wave 2 (2026-05-08). The phase is complete.
+
+**Goal:** the LLM features shipped in v3.1 (audit narrative), v4.1 (assisted
+rebuild fixers), and v5.1 (transformer judgment) all reach Prism.skill-loop.com
+under per-workspace control, with consultant-grade isolation and cost visibility.
+
+**Success criteria:**
+- A logged-in user can store their own Anthropic API key from a Settings page;
+  the key is encrypted at rest, never logged, never returned in any API
+  response except as a redacted last-4-digits summary.
+- Per-engagement narrative on/off toggle in the upload form (default on when
+  the workspace has a key set).
+- After Phase 12 lands: assisted-tier fixers fire when a workspace key is
+  present; rebuild-manifest carries `provenance.source: 'llm'` for assisted
+  patches and the diff report renders the "needs sign-off" chip.
+- After Phase 12 lands: transformer judgment surfaces in the checkpoint
+  preview as the AI verdict pill (`AI-CONFIRMED`, `AI-UNCERTAIN`) per the
+  v5.1 PRD's preview contract.
+- Per-workspace token-spend counter in the user's Settings page (last 30 days,
+  rolling).
+
+**Decisions to lock in:**
+- **Storage:** new table `workspace_llm_config` keyed on `user_id`. Columns:
+  `provider`, `model`, `encrypted_api_key`, `key_last4`, `created_at`,
+  `updated_at`. Encrypted via AES-GCM with a derived key from a new env var
+  `DATA_ENCRYPTION_KEY` (32 bytes, refused-to-start if missing in hosted
+  mode). Key rotation is a Phase 13+ question.
+- **Forwarding pattern:** the cloud reads workspace config in the audit/rebuild
+  route, decrypts the key into a local variable, sets it as a per-request env
+  var only for the writeReports/rebuild call (using a fresh provider instance).
+  Engagement isolation uses the same posture as v4.1: provider reinstantiated
+  per call.
+- **Cost telemetry:** `usage` from the v4.1/v3.1/v5.1 provenance objects gets
+  rolled into `workspace_llm_usage` (date, input_tokens, output_tokens,
+  estimated_cost_usd). Aggregated nightly. Per-user cost dashboard is a
+  Settings-page widget.
+- **Default model:** Anthropic Haiku 4.5 across all three features — same
+  default the CLI uses. Sonnet/Opus opt-in via the per-workspace `llm_model`
+  field.
+
+**Out of scope for Phase 12.5:**
+- OAuth-based key handoff (Anthropic doesn't offer this today).
+- Multi-provider fallback (OpenAI is reserved in `getProvider` but no Phase
+  ships it before there's demand).
+- Token-budget enforcement on the cloud beyond the existing per-call
+  `--llm-narrative-token-budget` and `--llm-judgment-token-budget` defaults.
+  Cost alerts are dashboard-only in this phase.
+
+**Sizing:**
+
+| Work | Days |
+|------|------|
+| DB migration + crypto helper + workspace_llm_config CRUD | 1.0 |
+| Settings page UI (provider picker, key input, last-4 redacted display, save/test/delete) | 1.0 |
+| Workspace-key threading: audit route, rebuild route (depends on Phase 12 first), narrative toggle | 0.5 |
+| Cost telemetry: usage rollup table + nightly aggregation + Settings widget | 1.0 |
+| Tests: encrypt/decrypt round-trip, key isolation across users, narrative on/off | 0.5 |
+| **Total** | **~4 days** (depends on Phase 12 for the rebuild + checkpoint surfaces) |
+
+---
+
+## Phase 8b — Bigger batches + parallel upload (~1 day)
+
+**Status (2026-05-08): Shipped.** The original Phase 8 cap of 50 files per batch was
+hard-coded; the cap is now env-configurable via `PRISM_MAX_BATCH_COUNT`
+(default 200). The browser uploader now runs N concurrent uploads (default 4)
+with sequential fallback. Per-file progress and a sequential-vs-parallel toggle
+are in the batch upload UI.
+
+**Goal:** a 200-package upload completes in ~5 minutes instead of ~25.
+
+**Success criteria:**
+- Browser uploader runs N concurrent uploads (configurable via the Settings
+  page; default 4) with backpressure when the worker queue is saturated.
+- Sequential-vs-parallel mode toggle in the batch upload UI; default
+  parallel. Per-file progress bars stack vertically with completion order
+  preserved in the rollup.
+- 413 batch_count_exceeded message displays the current cap honestly, not a
+  baked-in "50".
+
+**Out of scope:** resumable uploads (browser-side state for partial transfers
+is a Phase 13+ question — the workaround is "create a new batch and re-upload
+the failed files," which the existing per-file 202 + idempotent-by-sha256
+path already supports).
+
+**Sizing:** ~1 day, mostly frontend.
+
+---
+
+## Capacity baseline (CX31, measured 2026-05-08)
+
+The hosting target is a Hetzner CX31 (8 GB RAM, 2–4 vCPU, ~80 GB SSD).
+Measured per-package wall-clock against representative fixtures:
+
+| Operation | Per-package | At 3-concurrent |
+|---|---|---|
+| Audit | ~1 s (fixture) → ~20 s (real) | ~7 s/pkg amortized |
+| Audit + safe rebuild | ~2 s (fixture) → ~40 s (real) | ~13 s/pkg amortized |
+| Audit + full rebuild | ~8 s (fixture) → ~75 s (real) | ~25 s/pkg amortized |
+
+For a 200-package library:
+
+- Audit-only: **~22 minutes** at 3-concurrent, ~2.5 GB peak RAM.
+- Audit + safe rebuild: **~45 minutes**, same peak RAM.
+- Audit + full rebuild: **~80 minutes**.
+
+LLM cost (Anthropic Haiku 4.5, default budgets):
+
+- v3.1 narrative only: ~$0.054/package → **~$11/200-package library**.
+- v3.1 + v5.1 (judgment) on full rebuild: roughly +$0.025/package → **~$16/200-package library**.
+
+These numbers were measured against the project's own test fixtures, then
+scaled by typical-package multipliers. They're not promises — real packages
+with 20+ SCOs and bigger asset trees will push the upper bound. But they're
+adequate to falsify the "CX31 can't handle bulk" assumption: it can. The
+upload bottleneck has been addressed by Phase 8b's parallel browser upload,
+and the cloud rebuild surface (Phase 12) is now live.
+

@@ -36,6 +36,7 @@ const { loadFiles } = require('../../../src/lib/load-files');
 const { applyFixes, writeFixedZip } = require('../../../src/lib/auto-fix');
 const { diffAgainstBaseline } = require('../../../src/lib/baseline');
 const quotas = require('../lib/quotas');
+const { resolveLlmConfig, injectLlmConfigForCall } = require('../lib/llm-key-resolver');
 
 const UPLOAD_DIR = path.resolve(__dirname, '..', '..', '.tmp', 'uploads');
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024; // 1 GB
@@ -482,21 +483,34 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
         };
       }
 
-      const out = await writeReports({
-        scorecard,
-        violations,
-        manualReview: hot.result.manualReview,
-        scos: hot.result.scos,
-        dynamicReport: hot.result.dynamicReport,
-        fixesApplied: hot.result.fixesApplied,
-        options: {
-          json: true,
-          standard: (hot.options && hot.options.standard) || 'wcag22',
-          packageType: hot.result.packageType,
-          packagePath: path.basename(hot.uploadPath || ''),
-          engagementId: req.params.id,
-        },
-      });
+      // Resolve per-workspace LLM config (falls back to server env if no
+      // workspace key is configured for this user).
+      const resolvedLlm = await resolveLlmConfig(store, req.user ? req.user.id : null);
+      const injected = injectLlmConfigForCall(resolvedLlm);
+
+      let out;
+      try {
+        out = await writeReports({
+          scorecard,
+          violations,
+          manualReview: hot.result.manualReview,
+          scos: hot.result.scos,
+          dynamicReport: hot.result.dynamicReport,
+          fixesApplied: hot.result.fixesApplied,
+          options: {
+            json: true,
+            standard: (hot.options && hot.options.standard) || 'wcag22',
+            packageType: hot.result.packageType,
+            packagePath: path.basename(hot.uploadPath || ''),
+            engagementId: req.params.id,
+            llmProvider: injected.llmProvider,
+            llmKeyFromEnv: injected.llmKeyFromEnv,
+            llmModel: injected.llmModel,
+          },
+        });
+      } finally {
+        injected._restore();
+      }
 
       // writeReports returns a serialized jsonString; if a baseline was
       // applied we splice baselineMeta into the JSON before sending so the
@@ -532,21 +546,33 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
 
     const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), 'op-md-'));
     try {
-      const out = await writeReports({
-        scorecard: hot.result.scorecard,
-        violations: hot.result.violations,
-        manualReview: hot.result.manualReview,
-        scos: hot.result.scos,
-        dynamicReport: hot.result.dynamicReport,
-        fixesApplied: hot.result.fixesApplied,
-        options: {
-          format: 'md',
-          output: scratch,
-          standard: (hot.options && hot.options.standard) || 'wcag22',
-          packageType: hot.result.packageType,
-          packagePath: path.basename(hot.uploadPath || ''),
-        },
-      });
+      const resolvedLlm = await resolveLlmConfig(store, req.user ? req.user.id : null);
+      const injected = injectLlmConfigForCall(resolvedLlm);
+
+      let out;
+      try {
+        out = await writeReports({
+          scorecard: hot.result.scorecard,
+          violations: hot.result.violations,
+          manualReview: hot.result.manualReview,
+          scos: hot.result.scos,
+          dynamicReport: hot.result.dynamicReport,
+          fixesApplied: hot.result.fixesApplied,
+          options: {
+            format: 'md',
+            output: scratch,
+            standard: (hot.options && hot.options.standard) || 'wcag22',
+            packageType: hot.result.packageType,
+            packagePath: path.basename(hot.uploadPath || ''),
+            engagementId: req.params.id,
+            llmProvider: injected.llmProvider,
+            llmKeyFromEnv: injected.llmKeyFromEnv,
+            llmModel: injected.llmModel,
+          },
+        });
+      } finally {
+        injected._restore();
+      }
       const md = await fsp.readFile(out.mdPath, 'utf8');
       res.set('Content-Type', 'text/markdown; charset=utf-8');
       res.send(md);
@@ -572,22 +598,36 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
     try {
       const { renderHtml } = require('../../../src/reporter/html');
 
-      // Enrich the scorecard with v3 fields by calling writeReports with engagementId
-      const enrichResult = await writeReports({
-        scorecard: hot.result.scorecard,
-        violations: hot.result.violations,
-        manualReview: hot.result.manualReview,
-        scos: hot.result.scos,
-        dynamicReport: hot.result.dynamicReport,
-        fixesApplied: hot.result.fixesApplied,
-        options: {
-          json: true,
-          standard: (hot.options && hot.options.standard) || 'wcag22',
-          packageType: hot.result.packageType,
-          packagePath: path.basename(hot.uploadPath || ''),
-          engagementId: req.params.id,
-        },
-      });
+      // Enrich the scorecard with v3 fields by calling writeReports with engagementId.
+      // Resolve per-workspace LLM config so the v3.1 narrative attaches to
+      // enrichedScorecard on download, matching what the initial audit-completion
+      // path produces.
+      const resolvedLlm = await resolveLlmConfig(store, req.user ? req.user.id : null);
+      const injected = injectLlmConfigForCall(resolvedLlm);
+
+      let enrichResult;
+      try {
+        enrichResult = await writeReports({
+          scorecard: hot.result.scorecard,
+          violations: hot.result.violations,
+          manualReview: hot.result.manualReview,
+          scos: hot.result.scos,
+          dynamicReport: hot.result.dynamicReport,
+          fixesApplied: hot.result.fixesApplied,
+          options: {
+            json: true,
+            standard: (hot.options && hot.options.standard) || 'wcag22',
+            packageType: hot.result.packageType,
+            packagePath: path.basename(hot.uploadPath || ''),
+            engagementId: req.params.id,
+            llmProvider: injected.llmProvider,
+            llmKeyFromEnv: injected.llmKeyFromEnv,
+            llmModel: injected.llmModel,
+          },
+        });
+      } finally {
+        injected._restore();
+      }
 
       // Parse the enriched scorecard from JSON
       let enrichedScorecard;
@@ -598,9 +638,11 @@ function createAuditRouter({ jobs, config, requireAuth, csrfProtect, store }) {
         enrichedScorecard = hot.result.scorecard;
       }
 
-      // Render HTML directly using the enriched scorecard
+      // Render HTML directly using the enriched scorecard. Narrative (when
+      // present on the enriched scorecard) becomes "Section 01a" in the HTML.
       const htmlReport = renderHtml(enrichedScorecard, {
         engagementId: req.params.id,
+        narrative: enrichedScorecard.auditNarrative,
       });
 
       res.set({
